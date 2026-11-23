@@ -13,15 +13,18 @@ from reservas import (PISTAS, abrir_base, autenticar, disponibles, mis_reservas,
 from seguridad import (cargar_claves, clave_publica_pem, crear_claves,
                         firmar_justificante, verificar_justificante)
 
+# Si no se indica --datos, se usa la carpeta datos junto a main.py.
 DATOS = Path(__file__).resolve().parent / "datos"
 
 
 def guardar_nuevo(ruta, contenido):
+    # "xb" escribe bytes y falla si el archivo ya existe.
     with ruta.open("xb") as archivo:
         archivo.write(contenido)
 
 
 def mostrar(reserva):
+    # El catálogo da el nombre de la pista; :02d muestra la hora con dos cifras.
     print(f'{reserva["id"]} | {PISTAS[reserva["pista"]]} | '
           f'{reserva["fecha"]} | {reserva["hora"]:02d}:00')
 
@@ -33,6 +36,7 @@ def elegir_pista_y_fecha():
 
 
 def menu_usuario(db, clave, privada, cuenta_id):
+    # El ID de la sesión identifica al titular de las reservas.
     while True:
         print("\n1. Ver disponibilidad y reservar\n2. Mis reservas\n"
               "3. Exportar justificante\n0. Cerrar sesión")
@@ -53,6 +57,7 @@ def menu_usuario(db, clave, privada, cuenta_id):
                     print("Reserva guardada y cifrada con AES-128-GCM.")
                     mostrar(reserva)
             elif opcion in {"2", "3"}:
+                # Consultar y exportar parten de la misma lista de reservas propias.
                 reservas = mis_reservas(db, clave, cuenta_id)
                 if not reservas:
                     print("No tienes reservas.")
@@ -65,6 +70,7 @@ def menu_usuario(db, clave, privada, cuenta_id):
                     numero = int(input("Número de reserva: "))
                     if not 1 <= numero <= len(reservas):
                         raise ValueError("Número de reserva inválido.")
+                    # La lista visible empieza en 1; los índices de Python empiezan en 0.
                     reserva = reservas[numero - 1]
                     ruta = Path(input("Ruta para guardar el justificante: ").strip())
                     guardar_nuevo(ruta, firmar_justificante(privada, reserva))
@@ -80,6 +86,7 @@ def menu_usuario(db, clave, privada, cuenta_id):
 
 
 def menu(db, clave, privada, clave_mac):
+    # Menú de entrada. Al cerrar sesión se vuelve aquí.
     while True:
         print("\nG&C Secure | Reservas deportivas\n"
               "1. Registrarse\n2. Iniciar sesión\n0. Salir")
@@ -90,6 +97,7 @@ def menu(db, clave, privada, clave_mac):
             print("Opción no válida.")
             continue
         nombre = input("Usuario: ").strip()
+        # getpass lee la contraseña sin mostrarla en la terminal.
         password = getpass.getpass("Contraseña: ")
         try:
             if opcion == "1":
@@ -97,6 +105,7 @@ def menu(db, clave, privada, clave_mac):
                     raise ValueError("Las contraseñas no coinciden.")
                 registrar(db, clave_mac, nombre, password)
                 print("Cuenta creada.")
+            # := guarda el resultado de autenticar y comprueba si da acceso.
             elif cuenta_id := autenticar(db, clave_mac, nombre, password):
                 del password
                 menu_usuario(db, clave, privada, cuenta_id)
@@ -109,6 +118,7 @@ def menu(db, clave, privada, clave_mac):
 
 
 def main():
+    # argparse describe las opciones de terminal y genera el texto de --help.
     parser = argparse.ArgumentParser(description="G&C Secure | Reservas deportivas")
     parser.add_argument("--datos", type=Path, default=DATOS, help="Directorio de datos")
     comandos = parser.add_subparsers(dest="comando")
@@ -118,17 +128,20 @@ def main():
     verificar = comandos.add_parser("verificar", help="Verifica un justificante")
     verificar.add_argument("justificante", type=Path)
     verificar.add_argument("publica", type=Path, help="Clave pública obtenida del centro")
+    # Aquí se lee la orden real. Los nombres definidos arriba quedan en args.
     args = parser.parse_args()
     ruta_claves = args.datos / "claves.bin"
     ruta_db = args.datos / "reservas.sqlite3"
     try:
         if args.comando == "verificar":
+            # Verificar solo requiere el justificante y la clave pública del centro.
             reserva = verificar_justificante(args.publica.read_bytes(),
                                                args.justificante.read_bytes())
             mostrar(reserva)
             print("Firma válida (RSA-PSS/SHA-256).")
             return 0
         if args.comando == "inicializar":
+            # Cada directorio se prepara una vez para conservar las claves y sus datos.
             if ruta_claves.exists() or ruta_db.exists():
                 raise ValueError("Ya existen datos o claves en este directorio.")
             frase = getpass.getpass("Frase de acceso del operador: ")
@@ -141,12 +154,14 @@ def main():
             return 0
         if not ruta_claves.is_file():
             raise ValueError("No se encuentran las claves. Usa el comando inicializar.")
+        # El menú y la exportación desbloquean primero el archivo de claves.
         clave, privada, clave_mac = cargar_claves(
             ruta_claves, getpass.getpass("Frase del operador: "))
         if args.comando == "exportar-publica":
             guardar_nuevo(args.destino, clave_publica_pem(privada))
             print("Clave pública exportada.")
         else:
+            # closing cierra la conexión de SQLite al salir del menú.
             with closing(abrir_base(ruta_db)) as db:
                 menu(db, clave, privada, clave_mac)
         return 0
@@ -161,5 +176,6 @@ def main():
     return 1
 
 
+# Al lanzar main.py directamente, ejecuta main y devuelve su código a la terminal.
 if __name__ == "__main__":
     sys.exit(main())

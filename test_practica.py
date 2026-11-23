@@ -16,6 +16,7 @@ from seguridad import (cargar_claves, clave_publica_pem, codificar, crear_claves
                         decodificar, firmar_justificante, verificar_justificante)
 
 
+# Cada prueba recibe su propia base temporal y se limpia al acabar.
 class PracticaTest(unittest.TestCase):
     def setUp(self):
         temporal = tempfile.TemporaryDirectory()
@@ -66,6 +67,7 @@ class PracticaTest(unittest.TestCase):
             mis_reservas(self.db, bytes(16), "ana")
 
     def test_cifrado_y_metadatos_alterados(self):
+        # Cambia por separado el texto cifrado, la etiqueta y un campo visible.
         reservar(self.db, self.clave, "ana", 2, self.fecha, 18)
         legitimo = self.db.execute("SELECT titular_cifrado FROM reservas").fetchone()[0]
         for indice in (0, -1):
@@ -81,6 +83,7 @@ class PracticaTest(unittest.TestCase):
             disponibles(self.db, self.clave, 2, self.fecha)
 
     def test_colision_de_nonce(self):
+        # Fuerza que el generador entregue dos veces el mismo nonce.
         primero, segundo = b"a" * 12, b"b" * 12
         with patch("reservas.secrets.token_bytes", side_effect=[primero, primero, segundo]):
             reservar(self.db, self.clave, "ana", 2, self.fecha, 18)
@@ -115,6 +118,7 @@ class PracticaTest(unittest.TestCase):
                 verificar_justificante(publica, json.dumps(sobre))
 
     def test_flujo_de_consola_con_reinicio(self):
+        # Simula entradas de terminal y vuelve a abrir el mismo directorio.
         datos = self.ruta / "datos_cli"
         doc = self.ruta / "justificante.json"
         pub = self.ruta / "centro.pem"
