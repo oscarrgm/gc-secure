@@ -53,7 +53,7 @@ def leer_argumentos(argumentos):
         raise ValueError(f"Comando desconocido: {comando}.")
     if len(archivos) != cantidades[comando] or any(a.startswith("-") for a in archivos): #si no hay el número correcto de archivos o si alguno empieza con "-", se lanza un error
         raise ValueError(f"Argumentos incorrectos para {comando}.")
-    # Devuelve la carpeta, el comando y las rutas de archivo como objetos Path.
+    # Devuelve la carpeta (es un path), el comando y las rutas de archivo como objetos Path.
     return carpeta, comando, [Path(archivo) for archivo in archivos]
 
 
@@ -169,18 +169,26 @@ def main():
         #La función leer_argumentos devuelve la carpeta de datos, el comando y los archivos necesarios.
         carpeta, comando, archivos = leer_argumentos(argumentos)
     except ValueError as error:
+        #Muestra el motivo del error y el mensaje de uso en la salida de errores.
         print(f"{error}\n{USO}", file=sys.stderr)
+        # 2 indica argumentos incorrectos. Una ejecución correcta devuelve 0.
         return 2
-    ruta_claves = carpeta / "claves.bin"
-    ruta_db = carpeta / "reservas.sqlite3"
+
+    ruta_claves = carpeta / "claves.bin" #fichero donde se guardan las claves cifradas
+    ruta_db = carpeta / "reservas.sqlite3" #fichero donde se guarda la base de datos de reservas
+
     try:
+
         if comando == "verificar":
-            # Verificar solo requiere el justificante y la clave pública del centro.
-            justificante, publica = archivos
+            #Basta unicamente con el justificante y la clave pública, aunque no exista la carpeta de datos.
+            justificante, publica = archivos #si habia archivos, se asignan a justificante y publica (clave pública)
+            #como publica y justificante son objetos Path, se puede usar read_bytes() para leer su contenido en bytes.
+            #llamamos a la función verificar_justificante (en seguridad.py) con el contenido de los archivos y guardamos el resultado en reserva.
             reserva = verificar_justificante(publica.read_bytes(), justificante.read_bytes())
             mostrar(reserva)
             print("Firma válida (RSA-PSS/SHA-256).")
             return 0
+
         if comando == "inicializar":
             # Cada directorio se prepara una vez para conservar las claves y sus datos.
             if ruta_claves.exists() or ruta_db.exists():
@@ -198,6 +206,7 @@ def main():
         # El menú y la exportación desbloquean primero el archivo de claves.
         clave, privada, clave_mac = cargar_claves(
             ruta_claves, getpass.getpass("Frase del operador: "))
+
         if comando == "exportar-publica":
             # El justificante JSON se exporta por separado desde el menú de usuario.
             guardar_nuevo(archivos[0], clave_publica_pem(privada))

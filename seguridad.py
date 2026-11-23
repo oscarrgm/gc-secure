@@ -12,16 +12,25 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 ITERACIONES = 600_000
 # Estos prefijos identifican el propósito de los datos que autentica cada operación.
 CONTEXTO_CLAVES = b"G&C Secure / claves / v1"
+
+#Etiqueta fija para los justificantes de G&C Secure v1. Con un solo tipo de documento no es necesaria, pero si la misma clave firmara también cancelaciones,
+#cada tipo usaría una etiqueta distinta al firmar y al verificar.
+#\x00 es un byte de valor cero que separa la etiqueta del mensaje.
 CONTEXTO_FIRMA = b"G&C Secure / justificante / v1\x00"
+
+#PSS prepara el resumen del mensaje para la operación de firma con RSA. Al firmar usa una sal aleatoria de 32 bytes, por lo que dos firmas del mismo mensaje pueden ser distintas.
+#Al verificar se recupera esa salt (datos aleatorios que se añaden al firmar).
+#MGF1 usa SHA-256 para generar una máscara de bytes dentro de PSS.
 PSS = padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32)
 
 
 def codificar(datos):
-    # Base64 convierte bytes en texto para JSON. Se puede revertir sin una clave.
+    #Representa los bytes originales como texto Base64 para guardarlos en JSON. b64encode devuelve bytes ASCII y decode("ascii") los convierte en un str.
     return base64.b64encode(datos).decode("ascii")
 
 
 def decodificar(texto):
+    #Convierte el texto Base64 de vuelta a los bytes originales. validate=True rechaza texto Base64 inválido.
     return base64.b64decode(texto, validate=True)
 
 
@@ -91,19 +100,41 @@ def firmar_justificante(privada, reserva):
     return json_bytes({"mensaje": codificar(mensaje), "firma": codificar(firma)})
 
 
+#Funcion llamada desde main.py para verificar el justificante recibido del centro, usando la clave pública del centro.
 def verificar_justificante(publica_pem, documento):
+
+    #serialization.load_pem_public_key recibe los bytes del PEM y devuelve una clave pública utilizable.
     publica = serialization.load_pem_public_key(publica_pem)
+    #Comprueba si la clave es del tipo RSAPublicKey. Y si es RSA exigimos al menos 2048 bits (key_size indica su tamaño en bits).
     if not isinstance(publica, rsa.RSAPublicKey) or publica.key_size < 2048:
         raise ValueError("Se necesita una clave pública RSA de al menos 2048 bits.")
+
+    #Lee el JSON y lo convierte en un diccionario.
     sobre = json.loads(documento)
+    #El diccionario debe tener exactamente dos claves: mensaje y firma.
     if not isinstance(sobre, dict) or sobre.keys() != {"mensaje", "firma"}:
         raise ValueError("Formato de justificante incorrecto.")
+    #Comprueba que ambos valores sean str.
     if not all(isinstance(valor, str) for valor in sobre.values()):
         raise ValueError("Codificación de justificante incorrecta.")
+
+    #En el JSON, el mensaje y la firma están escritos como texto Base64.
+    #se usa para poder guardar la firma en el JSON, ya que no puede guardar bytes directamente (generada por RSA).
+    #Los decodificamos para recuperar los bytes originales antes de verificar la firma.
     mensaje = decodificar(sobre["mensaje"])
     firma = decodificar(sobre["firma"])
-    # Una firma inválida interrumpe la operación con InvalidSignature.
+
+    #Comprueba la firma con la clave pública y los mismos datos que firmó el centro. Si cambia el mensaje, la comprobación fallará.
+    #Usamos el mismo contexto que al firmar, que indica el tipo de documento.
+    #El método .verify() de cryptography recibe:
+    #1.firma: los bytes de la firma recuperados del justificante.
+    #2.CONTEXTO_FIRMA + mensaje: los datos exactos que firmó el centro.
+    #3.PSS: la misma configuración de máscara y sal que se usó al firmar.
+    #4.SHA256(): la función que calcula el resumen de los datos del punto 2.
+    #Si la firma no coincide, verify lanza InvalidSignature y la función se detiene.
     publica.verify(firma, CONTEXTO_FIRMA + mensaje, PSS, hashes.SHA256())
+
+    # Con la firma ya comprobada, lee los campos de la reserva y los devuelve al menú.
     reserva = json.loads(mensaje)
     if not isinstance(reserva, dict) or reserva.keys() != {"id", "pista", "fecha", "hora"}:
         raise ValueError("Formato de reserva incorrecto.")
