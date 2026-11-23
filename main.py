@@ -1,5 +1,4 @@
 """Interfaz de consola de G&C Secure."""
-import argparse
 import getpass
 import sqlite3
 import sys
@@ -15,6 +14,38 @@ from seguridad import (cargar_claves, clave_publica_pem, crear_claves,
 
 # Si no se indica --datos, se usa la carpeta datos junto a main.py.
 DATOS = Path(__file__).resolve().parent / "datos"
+USO = """G&C Secure | Reservas deportivas
+
+Uso:
+  main.py [--datos CARPETA]
+  main.py [--datos CARPETA] inicializar
+  main.py [--datos CARPETA] exportar-publica DESTINO
+  main.py [--datos CARPETA] verificar JUSTIFICANTE CLAVE_PUBLICA
+
+Si omites --datos, se usa la carpeta datos junto a main.py.
+"""
+
+
+def leer_argumentos(argumentos):
+    carpeta = DATOS
+    # Si está presente, --datos y su carpeta van al principio.
+    if argumentos[:1] == ["--datos"]:
+        if len(argumentos) < 2 or argumentos[1].startswith("-"):
+            raise ValueError("Falta la carpeta después de --datos.")
+        carpeta = Path(argumentos[1])
+        argumentos = argumentos[2:]
+
+    if not argumentos:
+        return carpeta, None, []
+
+    comando = argumentos[0]
+    archivos = argumentos[1:]
+    cantidades = {"inicializar": 0, "exportar-publica": 1, "verificar": 2}
+    if comando not in cantidades:
+        raise ValueError(f"Comando desconocido: {comando}.")
+    if len(archivos) != cantidades[comando] or any(a.startswith("-") for a in archivos):
+        raise ValueError(f"Argumentos incorrectos para {comando}.")
+    return carpeta, comando, [Path(archivo) for archivo in archivos]
 
 
 def guardar_nuevo(ruta, contenido):
@@ -118,29 +149,27 @@ def menu(db, clave, privada, clave_mac):
 
 
 def main():
-    # argparse describe las opciones de terminal y genera el texto de --help.
-    parser = argparse.ArgumentParser(description="G&C Secure | Reservas deportivas")
-    parser.add_argument("--datos", type=Path, default=DATOS, help="Directorio de datos")
-    comandos = parser.add_subparsers(dest="comando")
-    comandos.add_parser("inicializar", help="Genera las claves del sistema")
-    exportar = comandos.add_parser("exportar-publica", help="Exporta la clave del centro")
-    exportar.add_argument("destino", type=Path)
-    verificar = comandos.add_parser("verificar", help="Verifica un justificante")
-    verificar.add_argument("justificante", type=Path)
-    verificar.add_argument("publica", type=Path, help="Clave pública obtenida del centro")
-    # Aquí se lee la orden real. Los nombres definidos arriba quedan en args.
-    args = parser.parse_args()
-    ruta_claves = args.datos / "claves.bin"
-    ruta_db = args.datos / "reservas.sqlite3"
+    # sys.argv[0] es el nombre del programa; solo leemos lo que viene después.
+    argumentos = sys.argv[1:]
+    if "-h" in argumentos or "--help" in argumentos:
+        print(USO)
+        return 0
     try:
-        if args.comando == "verificar":
+        carpeta, comando, archivos = leer_argumentos(argumentos)
+    except ValueError as error:
+        print(f"{error}\n{USO}", file=sys.stderr)
+        return 2
+    ruta_claves = carpeta / "claves.bin"
+    ruta_db = carpeta / "reservas.sqlite3"
+    try:
+        if comando == "verificar":
             # Verificar solo requiere el justificante y la clave pública del centro.
-            reserva = verificar_justificante(args.publica.read_bytes(),
-                                               args.justificante.read_bytes())
+            justificante, publica = archivos
+            reserva = verificar_justificante(publica.read_bytes(), justificante.read_bytes())
             mostrar(reserva)
             print("Firma válida (RSA-PSS/SHA-256).")
             return 0
-        if args.comando == "inicializar":
+        if comando == "inicializar":
             # Cada directorio se prepara una vez para conservar las claves y sus datos.
             if ruta_claves.exists() or ruta_db.exists():
                 raise ValueError("Ya existen datos o claves en este directorio.")
@@ -148,7 +177,7 @@ def main():
             validar_frase(frase)
             if frase != getpass.getpass("Repite la frase: "):
                 raise ValueError("Las frases no coinciden.")
-            args.datos.mkdir(parents=True, exist_ok=True)
+            carpeta.mkdir(parents=True, exist_ok=True)
             crear_claves(ruta_claves, frase)
             print("Claves generadas. Guarda la frase de acceso en un lugar seguro.")
             return 0
@@ -157,8 +186,8 @@ def main():
         # El menú y la exportación desbloquean primero el archivo de claves.
         clave, privada, clave_mac = cargar_claves(
             ruta_claves, getpass.getpass("Frase del operador: "))
-        if args.comando == "exportar-publica":
-            guardar_nuevo(args.destino, clave_publica_pem(privada))
+        if comando == "exportar-publica":
+            guardar_nuevo(archivos[0], clave_publica_pem(privada))
             print("Clave pública exportada.")
         else:
             # closing cierra la conexión de SQLite al salir del menú.
