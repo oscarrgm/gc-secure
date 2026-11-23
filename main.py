@@ -27,24 +27,33 @@ Si omites --datos, se usa la carpeta datos junto a main.py.
 
 
 def leer_argumentos(argumentos):
+    # La carpeta de datos por defecto es "datos" junto a main.py., en caso de que no se indique otra.
     carpeta = DATOS
-    # Si está presente, --datos y su carpeta van al principio.
-    if argumentos[:1] == ["--datos"]:
-        if len(argumentos) < 2 or argumentos[1].startswith("-"):
+    # --datos elige dónde buscar o guardar claves.bin y reservas.sqlite3. Inicializar prepara esa carpeta y al arrancar se reutiliza la misma.
+
+    if argumentos[:1] == ["--datos"]: #si aparece --datos en la primera posición, se procesa y se elimina de la lista de argumentos
+        if len(argumentos) < 2 or argumentos[1].startswith("-"): #verifica que haya un argumento después de --datos y que no sea otro comando
             raise ValueError("Falta la carpeta después de --datos.")
-        carpeta = Path(argumentos[1])
-        argumentos = argumentos[2:]
+        carpeta = Path(argumentos[1]) #cambio la carpeta de datos a la especificada por el usuario
+        argumentos = argumentos[2:] #recorta la lista de argumentos para eliminar --datos y la carpeta especificada
 
     if not argumentos:
+        # Sin comando se abre el menú normal.
         return carpeta, None, []
 
+    #La primera palabra debe ser un comando válido. Un archivo suelto se rechaza (porque se trata como un comando invalido), y las palabras que siguen al comando son sus rutas.
     comando = argumentos[0]
     archivos = argumentos[1:]
+    # El diccionario relaciona cada comando con el número de rutas que pide:
+    # inicializar: 0, porque el programa decide los nombres internos.
+    # exportar-publica: 1, el destino del PEM con la clave pública.
+    # verificar: 2, primero el justificante JSON y luego la clave pública PEM.
     cantidades = {"inicializar": 0, "exportar-publica": 1, "verificar": 2}
     if comando not in cantidades:
         raise ValueError(f"Comando desconocido: {comando}.")
-    if len(archivos) != cantidades[comando] or any(a.startswith("-") for a in archivos):
+    if len(archivos) != cantidades[comando] or any(a.startswith("-") for a in archivos): #si no hay el número correcto de archivos o si alguno empieza con "-", se lanza un error
         raise ValueError(f"Argumentos incorrectos para {comando}.")
+    # Devuelve la carpeta, el comando y las rutas de archivo como objetos Path.
     return carpeta, comando, [Path(archivo) for archivo in archivos]
 
 
@@ -151,10 +160,13 @@ def menu(db, clave, privada, clave_mac):
 def main():
     # sys.argv[0] es el nombre del programa; solo leemos lo que viene después.
     argumentos = sys.argv[1:]
+    # Si se pide ayuda, se muestra el mensaje de uso definido y termina el programa.
     if "-h" in argumentos or "--help" in argumentos:
         print(USO)
         return 0
+
     try:
+        #La función leer_argumentos devuelve la carpeta de datos, el comando y los archivos necesarios.
         carpeta, comando, archivos = leer_argumentos(argumentos)
     except ValueError as error:
         print(f"{error}\n{USO}", file=sys.stderr)
@@ -187,6 +199,7 @@ def main():
         clave, privada, clave_mac = cargar_claves(
             ruta_claves, getpass.getpass("Frase del operador: "))
         if comando == "exportar-publica":
+            # El justificante JSON se exporta por separado desde el menú de usuario.
             guardar_nuevo(archivos[0], clave_publica_pem(privada))
             print("Clave pública exportada.")
         else:
