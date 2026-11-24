@@ -25,11 +25,15 @@ class PracticaTest(unittest.TestCase):
         self.db = abrir_base(self.ruta / "reservas.sqlite3")
         self.addCleanup(self.db.close)
         self.fecha = (date.today() + timedelta(days=1)).isoformat()
-        self.password = "ejemplo ficticio largo"
+        self.password = "Ejemplo ficticio 42"
         self.clave = bytes(range(16))
         self.clave_mac = secrets.token_bytes(32)
 
     def test_registro_y_autenticacion(self):
+        for debil in ("Corta1", " " * 12, "Sin numero alguno", "sin mayusculas 42",
+                      "SIN MINUSCULAS 42"):
+            with self.subTest(password=debil), self.assertRaises(ValueError):
+                registrar(self.db, self.clave_mac, "ana", debil)
         for nombre in ("ana", "luis"):
             registrar(self.db, self.clave_mac, nombre, self.password)
         cuentas = self.db.execute("SELECT sal, verificador FROM usuarios").fetchall()

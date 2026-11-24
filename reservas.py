@@ -34,10 +34,16 @@ CREATE TABLE IF NOT EXISTS reservas (
 """
 CAMPOS = ("id", "pista", "fecha", "hora")
 
-
-def validar_frase(frase):
-    if not 12 <= len(frase) <= 128 or frase.isspace():
-        raise ValueError("Usa una frase de entre 12 y 128 caracteres.")
+# Comprueba la longitud (entre 12 y 128) y exige una mayúscula, una minúscula y un dígito.
+def validar_password(password):
+    if not 12 <= len(password) <= 128:
+        raise ValueError("Usa una contraseña de entre 12 y 128 caracteres.")
+    #any comprueba si al menos un carácter cumple cada requisito.
+    tiene_mayuscula = any(c.isalpha() and c.isupper() for c in password) #isalpha comprueba si c es una letra e isupper si es mayúscula.
+    tiene_minuscula = any(c.isalpha() and c.islower() for c in password) #islower comprueba si la letra es minúscula.
+    tiene_digito = any(c.isdecimal() for c in password)#isdecimal comprueba si c es un dígito decimal.
+    if not tiene_mayuscula or not tiene_minuscula or not tiene_digito:
+        raise ValueError("Incluye al menos una mayúscula, una minúscula y un dígito.")
 
 
 def abrir_base(ruta):
@@ -51,7 +57,7 @@ def abrir_base(ruta):
 def registrar(db, clave_mac, nombre, password):
     if not re.fullmatch(r"[a-z0-9_]{3,32}", nombre):
         raise ValueError("Usa de 3 a 32 letras minúsculas ASCII, dígitos o guiones bajos.")
-    validar_frase(password)
+    validar_password(password)
     # El ID identifica la cuenta incluso si se reutiliza su nombre más adelante.
     # La base guarda un verificador y un HMAC, además de la sal y el ID.
     sal = secrets.token_bytes(16)

@@ -18,9 +18,9 @@ CONTEXTO_CLAVES = b"G&C Secure / claves / v1"
 #\x00 es un byte de valor cero que separa la etiqueta del mensaje.
 CONTEXTO_FIRMA = b"G&C Secure / justificante / v1\x00"
 
-#PSS prepara el resumen del mensaje para la operación de firma con RSA. Al firmar usa una sal aleatoria de 32 bytes, por lo que dos firmas del mismo mensaje pueden ser distintas.
-#Al verificar se recupera esa salt (datos aleatorios que se añaden al firmar).
-#MGF1 usa SHA-256 para generar una máscara de bytes dentro de PSS.
+#PSS prepara el bloque que firma RSA. Usa el resumen del mensaje y una sal aleatoria de 32 bytes para calcular un segundo resumen, H.
+#MGF1 usa SHA-256 y H para generar una secuencia de bytes (la máscara). PSS la combina mediante XOR con la parte del bloque que contiene la sal.
+#Al verificar, se vuelve a generar la misma máscara y se aplica XOR de nuevo para recuperar la sal original.
 PSS = padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32)
 
 
@@ -41,7 +41,7 @@ def json_bytes(datos):
 
 
 def derivar(secreto, sal):
-    # PBKDF2 repite el cálculo para encarecer cada intento de adivinar la frase.
+    # PBKDF2 repite el cálculo para encarecer cada intento de adivinar el secreto.
     return hashlib.pbkdf2_hmac("sha256", secreto.encode("utf-8"),
                                sal, ITERACIONES, dklen=32)
 
@@ -57,7 +57,7 @@ def etiqueta_cuenta(clave, nombre, cuenta_id, sal, verificador):
     return hmac.digest(clave, b"G&C Secure / cuenta / v1\x00" + contenido, "sha256")
 
 
-def crear_claves(ruta, frase):
+def crear_claves(ruta, password_operador):
     # El sistema genera claves independientes para cifrar, firmar y autenticar cuentas.
     clave_aes = AESGCM.generate_key(bit_length=128)
     privada = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -66,20 +66,20 @@ def crear_claves(ruta, frase):
                                  serialization.NoEncryption())
     contenido = json_bytes({"aes": codificar(clave_aes), "rsa": codificar(pem),
                             "mac": codificar(secrets.token_bytes(32))})
-    # Protege las tres claves juntas con AES-GCM y una clave derivada de la frase.
+    # Protege las tres claves juntas con AES-GCM y una clave derivada de la contraseña.
     sal, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
-    protegido = AESGCM(derivar(frase, sal)).encrypt(nonce, contenido, CONTEXTO_CLAVES)
+    protegido = AESGCM(derivar(password_operador, sal)).encrypt(nonce, contenido, CONTEXTO_CLAVES)
     with ruta.open("xb") as archivo:
         archivo.write(sal + nonce + protegido)
 
 
-def cargar_claves(ruta, frase):
+def cargar_claves(ruta, password_operador):
     datos = ruta.read_bytes()
     if len(datos) < 44:
         raise ValueError("Fichero de claves incompleto.")
     # El archivo empieza por la sal y el nonce, de tamaño fijo. El resto va cifrado.
     sal, nonce, protegido = datos[:16], datos[16:28], datos[28:]
-    contenido = AESGCM(derivar(frase, sal)).decrypt(nonce, protegido, CONTEXTO_CLAVES)
+    contenido = AESGCM(derivar(password_operador, sal)).decrypt(nonce, protegido, CONTEXTO_CLAVES)
     claves = json.loads(contenido)
     if "mac" not in claves:
         raise ValueError("Datos de la versión previa. Usa otro directorio con --datos e inicialízalo.")
@@ -127,14 +127,14 @@ def verificar_justificante(publica_pem, documento):
     #Comprueba la firma con la clave pública y los mismos datos que firmó el centro. Si cambia el mensaje, la comprobación fallará.
     #Usamos el mismo contexto que al firmar, que indica el tipo de documento.
     #El método .verify() de cryptography recibe:
-    #1.firma: los bytes de la firma recuperados del justificante.
+    #1.firma: los bytes de la firma recuperados del justificante. (con la publica y la firma recupero el bloque PSS)
     #2.CONTEXTO_FIRMA + mensaje: los datos exactos que firmó el centro.
-    #3.PSS: la misma configuración de máscara y sal que se usó al firmar.
+    #3.PSS (como interpreto el bloque): la misma configuración de máscara y sal que se usó al firmar.
     #4.SHA256(): la función que calcula el resumen de los datos del punto 2.
     #Si la firma no coincide, verify lanza InvalidSignature y la función se detiene.
     publica.verify(firma, CONTEXTO_FIRMA + mensaje, PSS, hashes.SHA256())
 
-    # Con la firma ya comprobada, lee los campos de la reserva y los devuelve al menú.
+    #Si la firma es válida, lee el mensaje y comprueba que sea un diccionario con exactamente los campos id, pista, fecha y hora antes de devolverlo.
     reserva = json.loads(mensaje)
     if not isinstance(reserva, dict) or reserva.keys() != {"id", "pista", "fecha", "hora"}:
         raise ValueError("Formato de reserva incorrecto.")

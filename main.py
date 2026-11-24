@@ -8,7 +8,7 @@ from pathlib import Path
 from cryptography.exceptions import InvalidSignature, InvalidTag
 
 from reservas import (PISTAS, abrir_base, autenticar, disponibles, mis_reservas,
-                      registrar, reservar, validar_frase)
+                      registrar, reservar, validar_password)
 from seguridad import (cargar_claves, clave_publica_pem, crear_claves,
                         firmar_justificante, verificar_justificante)
 
@@ -190,22 +190,28 @@ def main():
             return 0
 
         if comando == "inicializar":
-            # Cada directorio se prepara una vez para conservar las claves y sus datos.
+            #Cada directorio se prepara una vez para conservar las claves y sus datos.
             if ruta_claves.exists() or ruta_db.exists():
-                raise ValueError("Ya existen datos o claves en este directorio.")
-            frase = getpass.getpass("Frase de acceso del operador: ")
-            validar_frase(frase)
-            if frase != getpass.getpass("Repite la frase: "):
-                raise ValueError("Las frases no coinciden.")
+                raise ValueError("Ya existen datos o claves en este directorio.") #Falla si intenta inicializar en un directorio que ya tiene claves o base de datos.
+
+            #Lee la contraseña del operador sin mostrarla en la terminal.
+            password_operador = getpass.getpass("Contraseña de acceso del operador: ")
+            #Reutiliza los mismos requisitos que al crear una cuenta de usuario.
+            validar_password(password_operador)
+            #Pide escribirla otra vez para detectar errores al teclear
+            if password_operador != getpass.getpass("Repite la contraseña: "):
+                raise ValueError("Las contraseñas no coinciden.")
+
             carpeta.mkdir(parents=True, exist_ok=True)
-            crear_claves(ruta_claves, frase)
-            print("Claves generadas. Guarda la frase de acceso en un lugar seguro.")
+            crear_claves(ruta_claves, password_operador)
+            print("Claves generadas. Guarda la contraseña de acceso en un lugar seguro.")
             return 0
         if not ruta_claves.is_file():
             raise ValueError("No se encuentran las claves. Usa el comando inicializar.")
         # El menú y la exportación desbloquean primero el archivo de claves.
-        clave, privada, clave_mac = cargar_claves(
-            ruta_claves, getpass.getpass("Frase del operador: "))
+        password_operador = getpass.getpass("Contraseña de acceso del operador: ")
+        clave, privada, clave_mac = cargar_claves(ruta_claves, password_operador)
+        del password_operador
 
         if comando == "exportar-publica":
             # El justificante JSON se exporta por separado desde el menú de usuario.
@@ -219,7 +225,7 @@ def main():
     except InvalidSignature:
         print("Justificante rechazado: firma inválida.", file=sys.stderr)
     except InvalidTag:
-        print("Clave no desbloqueada: frase incorrecta o fichero alterado.", file=sys.stderr)
+        print("Clave no desbloqueada: contraseña incorrecta o fichero alterado.", file=sys.stderr)
     except (ValueError, OSError, sqlite3.Error, KeyError, TypeError) as error:
         print(f"Operación rechazada. {error}", file=sys.stderr)
     except (KeyboardInterrupt, EOFError):
