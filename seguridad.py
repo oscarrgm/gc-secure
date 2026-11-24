@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 ITERACIONES = 600_000
-# Estos prefijos identifican el propósito de los datos que autentica cada operación.
+#Estos prefijos identifican el propósito de los datos que autentica cada operación.
 CONTEXTO_CLAVES = b"G&C Secure / claves / v1"
 
 #Etiqueta fija para los justificantes de G&C Secure v1. Con un solo tipo de documento no es necesaria, pero si la misma clave firmara también cancelaciones,
@@ -34,14 +34,30 @@ def decodificar(texto):
     return base64.b64decode(texto, validate=True)
 
 
+#convierto un diccionario a JSON y lo codifico en UTF-8 para que AES-GCM pueda cifrarlo
 def json_bytes(datos):
-    # El orden fijo y los separadores dan la misma representación a los mismos datos.
+    #dumps() toma el diccionario y nos da texto JSON
     return json.dumps(datos, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False).encode("utf-8")
 
 
+#Comprueba la longitud (entre 12 y 128) y exige una mayúscula, una minúscula y un dígito.
+def validar_password(password):
+    if not 12 <= len(password) <= 128:
+        raise ValueError("Usa una contraseña de entre 12 y 128 caracteres.")
+    #any comprueba si al menos un carácter cumple cada requisito.
+    tiene_mayuscula = any(c.isalpha() and c.isupper() for c in password) #isalpha comprueba si c es una letra e isupper si es mayúscula.
+    tiene_minuscula = any(c.isalpha() and c.islower() for c in password) #islower comprueba si la letra es minúscula.
+    tiene_digito = any(c.isdecimal() for c in password) #isdecimal comprueba si c es un dígito decimal.
+    if not tiene_mayuscula or not tiene_minuscula or not tiene_digito:
+        raise ValueError("Incluye al menos una mayúscula, una minúscula y un dígito.")
+
+
+#Deriva una clave de 32 bytes a partir de la contraseña y la sal
 def derivar(secreto, sal):
-    # PBKDF2 repite el cálculo para encarecer cada intento de adivinar el secreto.
+    #PBKDF2 repite el cálculo para encarecer cada intento de adivinar el secreto. "sha256" es la función resumen que usa HMAC y secreto.encode convierte
+    #la contraseña en bytes para que HMAC pueda usarla como clave. sal permite obtener resultados distintos con la misma contraseña.
+    #ITERACIONES fija cuántas rondas se hacen (encareciendo ataques de fuerza bruta) y dklen=32 pide 32 bytes de salida.
     return hashlib.pbkdf2_hmac("sha256", secreto.encode("utf-8"),
                                sal, ITERACIONES, dklen=32)
 
@@ -57,33 +73,53 @@ def etiqueta_cuenta(clave, nombre, cuenta_id, sal, verificador):
     return hmac.digest(clave, b"G&C Secure / cuenta / v1\x00" + contenido, "sha256")
 
 
+#Solo se llama al inicializar
+#Recibe la password y la ruta donde guardará la clave
 def crear_claves(ruta, password_operador):
-    # El sistema genera claves independientes para cifrar, firmar y autenticar cuentas.
+    #El sistema genera claves independientes para cifrar, firmar y autenticar cuentas.
     clave_aes = AESGCM.generate_key(bit_length=128)
+    #RSA: e = 65537 es el exponente público usado para verificar firmas. key_size pide un módulo n de 2048 bits.
     privada = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    pem = privada.private_bytes(serialization.Encoding.PEM,
-                                 serialization.PrivateFormat.PKCS8,
-                                 serialization.NoEncryption())
+    #private_bytes convierte la clave en bytes.
+    pem = privada.private_bytes(serialization.Encoding.PEM, #Como representa el paquete (como texto)
+                                 serialization.PrivateFormat.PKCS8, #Como organizar esos bytes. PKCS8 da a la librería un formato conocido para escribir y recuperar esa información
+                                 serialization.NoEncryption()) #No cifra la clave privada dentro del paquete, porque el archivo completo se cifra con AES-GCM más abajo
+
+    #codificar convierte los bytes a Base64 para guardarlos en JSON.
     contenido = json_bytes({"aes": codificar(clave_aes), "rsa": codificar(pem),
-                            "mac": codificar(secrets.token_bytes(32))})
-    # Protege las tres claves juntas con AES-GCM y una clave derivada de la contraseña.
+                            "mac": codificar(secrets.token_bytes(32))})  # Clave HMAC de las cuentas.
+
+    #Protege las tres claves juntas con AES-GCM y una clave derivada de la contraseña.
     sal, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
-    protegido = AESGCM(derivar(password_operador, sal)).encrypt(nonce, contenido, CONTEXTO_CLAVES)
+    #Encriptamos el contenido con AES-GCM usando la clave derivada de la contraseña del operador, el nonce y el contexto CONTEXTO_CLAVES.
+    protegido = AESGCM(derivar(password_operador, sal)).encrypt(nonce, contenido, CONTEXTO_CLAVES) #se incluye el contexto para que AES-GCM autentique también el propósito de los datos cifrados
+    #"x" crea un archivo nuevo y falla si ya existe y "b" permite escribir bytes.
     with ruta.open("xb") as archivo:
         archivo.write(sal + nonce + protegido)
 
-
+#Carga las claves del sistema desde el archivo cifrado con la contraseña del operador
 def cargar_claves(ruta, password_operador):
+    #Lee el archivo en el mismo orden en que se escribió: sal, nonce y paquete cifrado con su etiqueta. El mínimo es 16 + 12 + 16 = 44 bytes:
+    #16 de sal, 12 de nonce y 16 de etiqueta AES-GCM, incluso sin contenido.
     datos = ruta.read_bytes()
     if len(datos) < 44:
         raise ValueError("Fichero de claves incompleto.")
-    # El archivo empieza por la sal y el nonce, de tamaño fijo. El resto va cifrado.
+    #Separa la sal y el nonce. El resto es el texto cifrado con su etiqueta al final.
     sal, nonce, protegido = datos[:16], datos[16:28], datos[28:]
+    #Repite la derivación con la contraseña y la sal guardada. AES-GCM comprueba la etiqueta con el mismo nonce y contexto antes de devolver el JSON.
     contenido = AESGCM(derivar(password_operador, sal)).decrypt(nonce, protegido, CONTEXTO_CLAVES)
+
+    #Lee el JSON que se preparó al crear las claves y lo convierte en un diccionario
     claves = json.loads(contenido)
-    if "mac" not in claves:
-        raise ValueError("Datos de la versión previa. Usa otro directorio con --datos e inicialízalo.")
+
+    #El paquete debe ser un diccionario con los tres campos: aes, rsa y mac.
+    if not isinstance(claves, dict) or claves.keys() != {"aes", "rsa", "mac"}:
+        raise ValueError("Formato de archivo de claves incorrecto.")
+
+    #decodificar quita el Base64 exterior
+    #carga el PEM como una clave RSA utilizable (objeto de cryptography). None indica que el PEM no lleva contraseña propia (porque no lo habiamos cifrado).
     privada = serialization.load_pem_private_key(decodificar(claves["rsa"]), None)
+    #Devuelve AES y HMAC como bytes y la privada RSA como objeto de cryptography.
     return decodificar(claves["aes"]), privada, decodificar(claves["mac"])
 
 

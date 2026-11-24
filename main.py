@@ -8,9 +8,9 @@ from pathlib import Path
 from cryptography.exceptions import InvalidSignature, InvalidTag
 
 from reservas import (PISTAS, abrir_base, autenticar, disponibles, mis_reservas,
-                      registrar, reservar, validar_password)
+                      registrar, reservar)
 from seguridad import (cargar_claves, clave_publica_pem, crear_claves,
-                        firmar_justificante, verificar_justificante)
+                        firmar_justificante, validar_password, verificar_justificante)
 
 # Si no se indica --datos, se usa la carpeta datos junto a main.py.
 DATOS = Path(__file__).resolve().parent / "datos"
@@ -202,16 +202,23 @@ def main():
             if password_operador != getpass.getpass("Repite la contraseña: "):
                 raise ValueError("Las contraseñas no coinciden.")
 
+            #Creamos la carpeta donde guardaremos las claves y la base de datos
+            #parents=True crea también los directorios padres si no existen, exist_ok=True evita error si ya existe.
             carpeta.mkdir(parents=True, exist_ok=True)
+
+            #Creamos las claves y las guardamos en el archivo de claves cifrado con la contraseña del operador.
             crear_claves(ruta_claves, password_operador)
             print("Claves generadas. Guarda la contraseña de acceso en un lugar seguro.")
             return 0
+
+        #Para abrir el menú o exportar la clave pública, claves.bin debe existir y ser un archivo (no solo si existe (por eso no usamos exists())).
+        #Lo comprobamos antes de pedir la contraseña del operador.
         if not ruta_claves.is_file():
             raise ValueError("No se encuentran las claves. Usa el comando inicializar.")
-        # El menú y la exportación desbloquean primero el archivo de claves.
+        #El menú y la exportación desbloquean primero el archivo de claves.
         password_operador = getpass.getpass("Contraseña de acceso del operador: ")
+        #recupera la clave AES, la clave privada RSA y la clave MAC a partir del archivo de claves cifrado con la contraseña del operador.
         clave, privada, clave_mac = cargar_claves(ruta_claves, password_operador)
-        del password_operador
 
         if comando == "exportar-publica":
             # El justificante JSON se exporta por separado desde el menú de usuario.

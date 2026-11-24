@@ -9,7 +9,7 @@ from uuid import uuid4
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from seguridad import derivar, etiqueta_cuenta, json_bytes, verificar_password
+from seguridad import derivar, etiqueta_cuenta, json_bytes, validar_password, verificar_password
 
 PISTAS = {1: "Pádel 1", 2: "Tenis 1", 3: "Fútbol sala"}
 HORAS = tuple(range(9, 22))
@@ -33,18 +33,6 @@ CREATE TABLE IF NOT EXISTS reservas (
 );
 """
 CAMPOS = ("id", "pista", "fecha", "hora")
-
-# Comprueba la longitud (entre 12 y 128) y exige una mayúscula, una minúscula y un dígito.
-def validar_password(password):
-    if not 12 <= len(password) <= 128:
-        raise ValueError("Usa una contraseña de entre 12 y 128 caracteres.")
-    #any comprueba si al menos un carácter cumple cada requisito.
-    tiene_mayuscula = any(c.isalpha() and c.isupper() for c in password) #isalpha comprueba si c es una letra e isupper si es mayúscula.
-    tiene_minuscula = any(c.isalpha() and c.islower() for c in password) #islower comprueba si la letra es minúscula.
-    tiene_digito = any(c.isdecimal() for c in password)#isdecimal comprueba si c es un dígito decimal.
-    if not tiene_mayuscula or not tiene_minuscula or not tiene_digito:
-        raise ValueError("Incluye al menos una mayúscula, una minúscula y un dígito.")
-
 
 def abrir_base(ruta):
     # row_factory permite acceder a cada campo por el nombre de su columna.
