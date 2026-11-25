@@ -32,7 +32,7 @@ Las pruebas modifican copias temporales del texto cifrado, la etiqueta, los dato
 
 ## Decisiones del programa
 
-- `main.py` contiene el menú y los comandos. `reservas.py` controla las cuentas, las franjas y SQLite. `seguridad.py` concentra las operaciones criptográficas.
+- `main.py` contiene el menú y los comandos. `usuarios_reservas.py` controla las cuentas, las franjas y SQLite. `seguridad.py` concentra las operaciones criptográficas.
 - El registro almacena un verificador PBKDF2-HMAC-SHA-256 de 32 bytes, con 600 000 iteraciones y una sal aleatoria de 16 bytes por cuenta. Al entrar se vuelve a derivar y se compara en tiempo constante.
 - Cada cuenta tiene un ID aleatorio. Un HMAC-SHA-256 autentica el nombre, el ID, la sal y el verificador con una clave aleatoria independiente de 256 bits guardada en el archivo de claves cifrado. Si se altera la cuenta, el inicio de sesión se rechaza. Una nueva cuenta con el mismo nombre recibe un ID distinto y no hereda las reservas.
 - AES-128-GCM cifra el identificador del titular y autentica también el ID, la pista, la fecha y la hora de la reserva como datos asociados. El nonce aleatorio de 12 bytes se comprueba antes de cifrar dentro de una transacción SQLite que impide escrituras simultáneas. Los registros se conservan y la base de datos también impone la unicidad del nonce y de la franja. El tag de 16 bytes va al final del texto cifrado, tal como lo devuelve la biblioteca.

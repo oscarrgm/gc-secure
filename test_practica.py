@@ -11,7 +11,7 @@ from unittest.mock import patch
 from cryptography.exceptions import InvalidSignature, InvalidTag
 
 import main
-from reservas import abrir_base, autenticar, disponibles, mis_reservas, registrar, reservar
+from usuarios_reservas import abrir_base, autenticar, disponibles, mis_reservas, registrar, reservar
 from seguridad import (cargar_claves, clave_publica_pem, codificar, crear_claves,
                         decodificar, firmar_justificante, verificar_justificante)
 
@@ -89,7 +89,7 @@ class PracticaTest(unittest.TestCase):
     def test_colision_de_nonce(self):
         # Fuerza que el generador entregue dos veces el mismo nonce.
         primero, segundo = b"a" * 12, b"b" * 12
-        with patch("reservas.secrets.token_bytes", side_effect=[primero, primero, segundo]):
+        with patch("usuarios_reservas.secrets.token_bytes", side_effect=[primero, primero, segundo]):
             reservar(self.db, self.clave, "ana", 2, self.fecha, 18)
             reservar(self.db, self.clave, "ana", 2, self.fecha, 19)
         self.assertEqual(len(mis_reservas(self.db, self.clave, "ana")), 2)

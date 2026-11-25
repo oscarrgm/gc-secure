@@ -1,4 +1,4 @@
-"""Reglas de negocio y almacenamiento en SQLite."""
+"""Cuentas de usuario, reservas y almacenamiento en SQLite."""
 import hmac
 import re
 import secrets

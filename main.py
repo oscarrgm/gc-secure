@@ -7,8 +7,8 @@ from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature, InvalidTag
 
-from reservas import (PISTAS, abrir_base, autenticar, disponibles, mis_reservas,
-                      registrar, reservar)
+from usuarios_reservas import (PISTAS, abrir_base, autenticar, disponibles,
+                               mis_reservas, registrar, reservar)
 from seguridad import (cargar_claves, clave_publica_pem, crear_claves,
                         firmar_justificante, validar_password, verificar_justificante)
 
