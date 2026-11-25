@@ -13,32 +13,48 @@ from seguridad import derivar, etiqueta_cuenta, json_bytes, validar_password, ve
 
 PISTAS = {1: "Pádel 1", 2: "Tenis 1", 3: "Fútbol sala"}
 HORAS = tuple(range(9, 22))
-# SQLite impone un nonce único por reserva y una única reserva por franja.
+# BLOB permite a SQLite guardar bytes directamente, sin convertirlos a Base64.
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS usuarios (
+    -- El nombre es único y sirve para buscar la cuenta al iniciar sesión.
     nombre TEXT PRIMARY KEY,
+    -- Cada cuenta nueva recibe su propio ID, aunque reutilice un nombre.
     id TEXT NOT NULL UNIQUE,
+    -- La sal es aleatoria por cuenta. Se guarda para recalcular el verificador.
     sal BLOB NOT NULL,
+    -- PBKDF2 calcula este valor a partir de la contraseña y la sal.
+    -- Al iniciar sesión se compara el resultado; la contraseña no se guarda.
     verificador BLOB NOT NULL,
+    -- HMAC de nombre, ID, sal y verificador para detectar cambios en la cuenta.
     etiqueta BLOB NOT NULL
 );
 CREATE TABLE IF NOT EXISTS reservas (
+    -- Identifica una reserva concreta, no al usuario ni a la pista.
     id TEXT PRIMARY KEY,
+    -- Estos tres campos identifican la franja y quedan visibles.
     pista INTEGER NOT NULL,
     fecha TEXT NOT NULL,
     hora INTEGER NOT NULL,
+    -- AES-GCM necesita este valor para recuperar el titular. Se guarda en claro y UNIQUE evita que dos reservas guardadas tengan el mismo nonce.
     nonce BLOB NOT NULL UNIQUE,
+    -- ID de la cuenta que reservó, cifrado con AES-GCM. Incluye su etiqueta.
     titular_cifrado BLOB NOT NULL,
+    -- Impide dos reservas en la misma pista, fecha y hora.
     UNIQUE (pista, fecha, hora)
 );
 """
 CAMPOS = ("id", "pista", "fecha", "hora")
 
+#Recibe la ruta de la base de datos y devuelve un objeto de conexión a SQLite.
+#La base de datos se abre en modo "IMMEDIATE" para que las transacciones bloqueen la base de datos desde el principio y no haya sorpresas al escribir.
 def abrir_base(ruta):
-    # row_factory permite acceder a cada campo por el nombre de su columna.
+    #Abre el archivo de SQLite o lo crea si aún no existe. (db es la conexión que usaremos para enviarle consultas)
     db = sqlite3.connect(ruta, isolation_level="IMMEDIATE")
+    #Devuelve las filas como sqlite3.Row para acceder a sus columnas por nombre.
     db.row_factory = sqlite3.Row
+    #Ejecuta las dos instrucciones SQL (crea las tablas si no existen). executescript ejecuta varias instrucciones SQL separadas por punto y coma.
     db.executescript(ESQUEMA)
+    #devuelve la conexión a la base de datos abierta
     return db
 
 

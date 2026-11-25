@@ -9,8 +9,11 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+#Numero de iteraciones de PBKDF2 para derivar la clave de cifrado a partir de la contraseña del operador.
+#Cuanto mayor, más lento será el desbloqueo y más seguro frente a ataques de fuerza bruta.
 ITERACIONES = 600_000
-#Estos prefijos identifican el propósito de los datos que autentica cada operación.
+
+#Etiqueta fija para el paquete de claves del sistema. Se incluye en el cálculo de la etiqueta AES-GCM para que no se pueda usar el mismo paquete para otro propósito.
 CONTEXTO_CLAVES = b"G&C Secure / claves / v1"
 
 #Etiqueta fija para los justificantes de G&C Secure v1. Con un solo tipo de documento no es necesaria, pero si la misma clave firmara también cancelaciones,
@@ -24,13 +27,12 @@ CONTEXTO_FIRMA = b"G&C Secure / justificante / v1\x00"
 PSS = padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32)
 
 
+#Representa los bytes originales como texto Base64 para guardarlos en JSON. b64encode devuelve bytes ASCII y decode("ascii") los convierte en un str.
 def codificar(datos):
-    #Representa los bytes originales como texto Base64 para guardarlos en JSON. b64encode devuelve bytes ASCII y decode("ascii") los convierte en un str.
     return base64.b64encode(datos).decode("ascii")
 
-
+#Convierte el texto Base64 de vuelta a los bytes originales. validate=True rechaza texto Base64 inválido.
 def decodificar(texto):
-    #Convierte el texto Base64 de vuelta a los bytes originales. validate=True rechaza texto Base64 inválido.
     return base64.b64decode(texto, validate=True)
 
 
@@ -123,8 +125,9 @@ def cargar_claves(ruta, password_operador):
     return decodificar(claves["aes"]), privada, decodificar(claves["mac"])
 
 
+#Función para obtener la clave pública en formato PEM a partir de la clave privada.
 def clave_publica_pem(privada):
-    # PEM es el formato de texto que guardamos en el archivo centro.pem.
+    #PEM es el formato de texto que guardamos en el archivo centro.pem.
     return privada.public_key().public_bytes(serialization.Encoding.PEM,
                                              serialization.PublicFormat.SubjectPublicKeyInfo)
 

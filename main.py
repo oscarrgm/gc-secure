@@ -25,7 +25,7 @@ Uso:
 Si omites --datos, se usa la carpeta datos junto a main.py.
 """
 
-
+# Lee los argumentos de la línea de comandos y devuelve la carpeta de datos, el comando y las rutas de archivo como objetos Path.
 def leer_argumentos(argumentos):
     # La carpeta de datos por defecto es "datos" junto a main.py., en caso de que no se indique otra.
     carpeta = DATOS
@@ -56,9 +56,9 @@ def leer_argumentos(argumentos):
     # Devuelve la carpeta (es un path), el comando y las rutas de archivo como objetos Path.
     return carpeta, comando, [Path(archivo) for archivo in archivos]
 
-
+#Escribe el contenido en la ruta indicada, pero falla si el archivo ya existe. Se usa para exportar la clave pública y los justificantes firmados.
 def guardar_nuevo(ruta, contenido):
-    # "xb" escribe bytes y falla si el archivo ya existe.
+    #"xb" escribe bytes y falla si el archivo ya existe.
     with ruta.open("xb") as archivo:
         archivo.write(contenido)
 
@@ -126,25 +126,37 @@ def menu_usuario(db, clave, privada, cuenta_id):
 
 
 def menu(db, clave, privada, clave_mac):
-    # Menú de entrada. Al cerrar sesión se vuelve aquí.
+    #Menú de entrada. Al cerrar sesión se vuelve aquí.
     while True:
         print("\nG&C Secure | Reservas deportivas\n"
               "1. Registrarse\n2. Iniciar sesión\n0. Salir")
+        #strip quita los espacios de los extremos, Por ejemplo: " 2 " se lee como "2".
         opcion = input("> ").strip()
+
+        #Opcion de salir
         if opcion == "0":
             return
+
+        #Cualquier otro numero que no sea ni 1 ni 2 es invalido
         if opcion not in {"1", "2"}:
             print("Opción no válida.")
+            #Vuelve al inicio del bucle para mostrar el menú con las opciones disponibles.
             continue
+
+        #Si eliges registrarse o iniciar sesión, pide el nombre de usuario y la contraseña.
         nombre = input("Usuario: ").strip()
-        # getpass lee la contraseña sin mostrarla en la terminal.
+        #getpass lee la contraseña sin mostrarla en la terminal.
         password = getpass.getpass("Contraseña: ")
+
         try:
+            #Si la opción es registrarse, pide repetir la contraseña y llama a registrar.
             if opcion == "1":
                 if password != getpass.getpass("Repite la contraseña: "):
                     raise ValueError("Las contraseñas no coinciden.")
-                registrar(db, clave_mac, nombre, password)
+
+                registrar(db, clave_mac, nombre, password) #Dentro de registrar, se valida el nombre y la contraseña, se genera la sal, el ID de la cuenta, el verificador y la etiqueta, y se inserta en la base de datos.
                 print("Cuenta creada.")
+
             # := guarda el resultado de autenticar y comprueba si da acceso.
             elif cuenta_id := autenticar(db, clave_mac, nombre, password):
                 del password
@@ -221,14 +233,22 @@ def main():
         clave, privada, clave_mac = cargar_claves(ruta_claves, password_operador)
 
         if comando == "exportar-publica":
-            # El justificante JSON se exporta por separado desde el menú de usuario.
+            #Utilizamos la función clave_publica_pem para obtener la clave pública en formato PEM a partir de la clave privada.
+            #Luego usamos guardar_nuevo para escribir la clave pública en el archivo destino (debe ser nuevo, ya que así no reemplazamos por accidente la clave pública de otro centro).
             guardar_nuevo(archivos[0], clave_publica_pem(privada))
             print("Clave pública exportada.")
+
+        #Si no hay comando, abrimos el menú normal. La base de datos se abre dentro de un bloque with para cerrarla automáticamente al salir del menú.
         else:
-            # closing cierra la conexión de SQLite al salir del menú.
+            #abrimos la base de datos de reservas con abrir_base y la usamos dentro de un with closing para cerrarla automáticamente al salir del menú
+            #guardamos en db la conexión a la base de datos abierta
             with closing(abrir_base(ruta_db)) as db:
+                #abrimos el menu principal (el que se ve antes de iniciar sesión o registrarse) con la base de datos, la clave AES, la clave privada RSA y la clave MAC
                 menu(db, clave, privada, clave_mac)
+        # Si la operación termina correctamente, devolvemos 0 a la terminal.
         return 0
+
+    #Cada except maneja un tipo de error. cryptography lanza InvalidSignature si la firma no es válida e InvalidTag si falla la autenticación de AES-GCM.
     except InvalidSignature:
         print("Justificante rechazado: firma inválida.", file=sys.stderr)
     except InvalidTag:
@@ -237,9 +257,11 @@ def main():
         print(f"Operación rechazada. {error}", file=sys.stderr)
     except (KeyboardInterrupt, EOFError):
         print("\nOperación interrumpida.", file=sys.stderr)
+    #Tras mostrar el error, devolvemos 1 para indicar que la operación falló.
     return 1
 
 
-# Al lanzar main.py directamente, ejecuta main y devuelve su código a la terminal.
+#Al lanzar main.py directamente, ejecuta main y devuelve su código a la terminal:
+#0 si termina bien, 1 si falla o se interrumpe, 2 si los argumentos son incorrectos.
 if __name__ == "__main__":
     sys.exit(main())
