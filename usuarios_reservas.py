@@ -11,7 +11,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from seguridad import derivar, etiqueta_cuenta, json_bytes, validar_password, verificar_password
 
-PISTAS = {1: "Pádel 1", 2: "Tenis 1", 3: "Fútbol sala"}
+# Catálogo común: el menú muestra las pistas y disponibles() valida el número.
+PISTAS = {1: "Pádel", 2: "Tenis", 3: "Fútbol sala"}
 HORAS = tuple(range(9, 22))
 # BLOB permite a SQLite guardar bytes directamente, sin convertirlos a Base64.
 ESQUEMA = """
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS reservas (
     UNIQUE (pista, fecha, hora)
 );
 """
+# Campos visibles de cada reserva. También se autentican como datos asociados.
 CAMPOS = ("id", "pista", "fecha", "hora")
 
 #Recibe la ruta de la base de datos y devuelve un objeto de conexión a SQLite.
@@ -114,32 +116,69 @@ def autenticar(db, clave_mac, nombre, password):
 
 
 def aad(reserva):
-    # AES-GCM autentica estos campos visibles al comprobar el titular cifrado.
+    #AES-GCM autentica estos campos visibles al comprobar el titular cifrado.
     return b"G&C Secure / reserva / v1\x00" + json_bytes(
         {campo: reserva[campo] for campo in CAMPOS})
 
 
+#Lee todas las reservas de la base de datos y devuelve una lista de parejas (reserva, titular)
+#Se usa para mostrar las reservas de un usuario y para comprobar la disponibilidad de una franja.
 def leer_reservas(db, clave):
-    # decrypt comprueba la etiqueta antes de devolver el ID del titular.
+    #Prepara AES-GCM con la clave simétrica de las reservas.
     cifrador = AESGCM(clave)
+    #El SELECT recorre todas las filas.
     filas = db.execute("SELECT * FROM reservas ORDER BY fecha, hora, pista")
-    return [
-        ({campo: fila[campo] for campo in CAMPOS},
-         cifrador.decrypt(fila["nonce"], fila["titular_cifrado"], aad(fila)).decode("utf-8"))
-        for fila in filas
-    ]
+
+    reservas_leidas = []
+    # De cada fila copiamos los campos "id", "pista", "fecha" y "hora".
+    #Se descifra el titular y se devuelve junto con los datos visibles de la reserva.
+    for fila in filas:
+        reserva = {}
+        for campo in CAMPOS:
+            reserva[campo] = fila[campo]
+
+        #decrypt comprueba la etiqueta antes de devolver los bytes del ID.
+        #trata de descifrar el ID del titular de la reserva, que estaba cifrado con AES-GCM y autenticado con los datos visibles de la reserva.
+        titular_bytes = cifrador.decrypt(fila["nonce"], fila["titular_cifrado"], aad(fila))
+        titular = titular_bytes.decode("utf-8")
+        #Cada elemento es una pareja: datos visibles de la reserva e ID de su titular.
+        reservas_leidas.append((reserva, titular))
+
+    return reservas_leidas
 
 
-def disponibles(db, clave, pista, fecha, ahora=None):
-    # Ahora puede fijarse en una prueba; por defecto se usa la hora del equipo.
-    ahora = ahora or datetime.now()
+#Devuelve las horas disponibles para una pista y fecha dadas, comparando con las reservas existentes.
+def disponibles(db, clave, pista, fecha):
+    #fijamos la fecha actual para que no se puedan reservar franjas pasadas.
+    ahora = datetime.now()
+    #paso la fecha de texto a un objeto date para poder compararla con la fecha actual
+    #ademas, verifica que la fecha introducida por el usuario es válida (que no ha puesto mes o dia inexistentes)
+    # fromisoformat admite formatos ISO. La comparación posterior exige AAAA-MM-DD.
     dia = date.fromisoformat(fecha)
+
+    #Comprobamos que la pista que nos ha dado el usuario es válida
+    #y que la fecha no es pasada. Si no, lanzamos un ValueError.
+    #isoformat vuelve a escribir la fecha como AAAA-MM-DD para compararlo con la entrada, exigiendo ese formato.
     if pista not in PISTAS or dia.isoformat() != fecha or dia < ahora.date():
         raise ValueError("Elige una pista válida y una fecha no pasada (AAAA-MM-DD).")
-    ocupadas = {r["hora"] for r, _ in leer_reservas(db, clave)
-                if r["pista"] == pista and r["fecha"] == fecha}
-    return [hora for hora in HORAS if hora not in ocupadas
-            and datetime.combine(dia, time(hora)) > ahora]
+
+    # Guarda la hora de cada reserva que coincida con la pista y el día elegidos.
+    ocupadas = []
+    for elemento in leer_reservas(db, clave):
+        #Cada elemento es una pareja: [0] son los datos de la reserva y [1] es el ID del titular. Para ver si está ocupada, solo usamos [0].
+        reserva = elemento[0]
+        if reserva["pista"] == pista and reserva["fecha"] == fecha:
+            ocupadas.append(reserva["hora"])
+
+    horas_libres = []
+    for hora in HORAS:
+        if hora in ocupadas:
+            continue
+        # Une el día elegido y la hora de la franja para compararlos con ahora.
+        inicio_franja = datetime.combine(dia, time(hora))
+        if inicio_franja > ahora:
+            horas_libres.append(hora)
+    return horas_libres
 
 
 def reservar(db, clave, cuenta_id, pista, fecha, hora):

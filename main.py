@@ -12,7 +12,7 @@ from usuarios_reservas import (PISTAS, abrir_base, autenticar, disponibles,
 from seguridad import (cargar_claves, clave_publica_pem, crear_claves,
                         firmar_justificante, validar_password, verificar_justificante)
 
-# Si no se indica --datos, se usa la carpeta datos junto a main.py.
+#Si no se indica --datos, se usa la carpeta datos junto a main.py.
 DATOS = Path(__file__).resolve().parent / "datos"
 USO = """G&C Secure | Reservas deportivas
 
@@ -68,25 +68,36 @@ def mostrar(reserva):
     print(f'{reserva["id"]} | {PISTAS[reserva["pista"]]} | '
           f'{reserva["fecha"]} | {reserva["hora"]:02d}:00')
 
-
+#Da las opciones de las pistas, y pide cual quiere y su fecha
 def elegir_pista_y_fecha():
-    for numero, pista in PISTAS.items():
-        print(f"{numero}. {pista}")
+    #Cada item es una pareja como (2, "Tenis")
+    #item[0] es el número de la pista e item[1] es su nombre.
+    for item in PISTAS.items():
+        print(f"{item[0]}. {item[1]}")
+    #Pide al usuario y devuelve el número de pista como entero y la fecha como texto.
     return int(input("Número de pista: ")), input("Fecha (AAAA-MM-DD): ").strip()
 
-
+# Menú que se muestra tras iniciar sesión.
+#Permite ver disponibilidad, reservar, consultar reservas y exportar justificantes.
 def menu_usuario(db, clave, privada, cuenta_id):
-    # El ID de la sesión identifica al titular de las reservas.
     while True:
+        #Muestra las opciones
         print("\n1. Ver disponibilidad y reservar\n2. Mis reservas\n"
               "3. Exportar justificante\n0. Cerrar sesión")
+        #Pide el input del usuario y elimina los espacios de los extremos
         opcion = input("> ").strip()
+
         try:
+            #Opción para cerrar sesión y volver al menú principal
             if opcion == "0":
                 return
+
+            #Opción para ver disponibilidad y reservar
             if opcion == "1":
                 pista, fecha = elegir_pista_y_fecha()
+                #Busca las horas disponibles para la pista y fecha indicadas, usando la función disponibles de usuarios_reservas.py
                 horas = disponibles(db, clave, pista, fecha)
+
                 if not horas:
                     print("No hay franjas disponibles.")
                     continue
@@ -117,6 +128,7 @@ def menu_usuario(db, clave, privada, cuenta_id):
                     print(f"Justificante firmado (RSA-PSS-2048/SHA-256): {ruta}")
             else:
                 print("Opción no válida.")
+        #Errores
         except InvalidTag:
             print("Datos rechazados: falló la comprobación AES-GCM.", file=sys.stderr)
         except FileExistsError:
@@ -125,6 +137,7 @@ def menu_usuario(db, clave, privada, cuenta_id):
             print(f"No se pudo completar la operación. {error}", file=sys.stderr)
 
 
+#Menú tras abrir el sistema con la contraseña del operador
 def menu(db, clave, privada, clave_mac):
     #Menú de entrada. Al cerrar sesión se vuelve aquí.
     while True:
