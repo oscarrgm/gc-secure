@@ -57,41 +57,60 @@ def abrir_base(ruta):
     #devuelve la conexión a la base de datos abierta
     return db
 
-
+#Registra un nuevo usuario en la base de datos.
 def registrar(db, clave_mac, nombre, password):
+    #fullmatch exige que el nombre entero cumpla el patrón de 3 a 32 caracteres [a-z0-9_]
+    #no permitimos mayúsculas, espacios ni caracteres especiales
     if not re.fullmatch(r"[a-z0-9_]{3,32}", nombre):
         raise ValueError("Usa de 3 a 32 letras minúsculas ASCII, dígitos o guiones bajos.")
+    #Comprueba la contraseña
     validar_password(password)
-    # El ID identifica la cuenta incluso si se reutiliza su nombre más adelante.
-    # La base guarda un verificador y un HMAC, además de la sal y el ID.
-    sal = secrets.token_bytes(16)
-    cuenta_id = uuid4().hex
-    verificador = derivar(password, sal)
-    etiqueta = etiqueta_cuenta(clave_mac, nombre, cuenta_id, sal, verificador)
+
+    #La base guarda un verificador y un HMAC, además de la sal y el ID.
+    sal = secrets.token_bytes(16)  #Sal aleatoria para el verificador de esta cuenta.
+    cuenta_id = uuid4().hex #Genera un ID aleatorio y lo representa como texto hexadecimal.
+    verificador = derivar(password, sal) #Deriva una clave de 32 bytes a partir de la contraseña y la sal
+    etiqueta = etiqueta_cuenta(clave_mac, nombre, cuenta_id, sal, verificador) #Para comprobar que el nombre, ID, sal y verificador no se han modificado.
+
+    #Se añade al usuario a la base de datos. La transacción se confirma al salir del bloque with.
     try:
         with db:
-            # SQLite recibe los valores aparte de la consulta, en lugar de interpolarlos.
+            #Cada ? recibe un valor de la tupla de abajo, en el mismo orden.
             db.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)",
                        (nombre, cuenta_id, sal, verificador, etiqueta))
+    #Si el nombre ya existe, SQLite rechaza el INSERT porque es clave primaria.
     except sqlite3.IntegrityError as error:
         raise ValueError("Ese nombre de usuario ya existe.") from error
 
 
+#Comprueba que el nombre y la contraseña coinciden con una cuenta de la base de datos.
 def autenticar(db, clave_mac, nombre, password):
-    if len(password) > 128:
+    #La longitud de registro es de 12 a 128 caracteres. Descarta el resto sin consultar SQLite.
+    if not 12 <= len(password) <= 128:
         return None
+
+    #Busca por nombre (clave primaria). fetchone devuelve la fila (como objeto sqlite3.Row) o None.
     cuenta = db.execute("SELECT id, sal, verificador, etiqueta FROM usuarios WHERE nombre = ?",
                         (nombre,)).fetchone()
+
     if cuenta is None:
-        # Una búsqueda sin resultado también hace el cálculo costoso de contraseña.
-        verificar_password(password, bytes(16), bytes(32))
+        #Repite el cálculo costoso con una sal y un verificador ficticios (ceros).
+        #Así cuesta más distinguir por el tiempo si la cuenta existe.
+        #Se ignora el resultado y el acceso se rechaza siempre.
+        verificar_password(password, bytes(16), bytes(32)) #Bytes(x) devuelve x ceros. La sal es de 16 bytes y el verificador de 32.
         return None
-    # Primero autentica los datos de la cuenta y después comprueba la contraseña.
+
+
+    #Guardo los valores de la fila en variables.
     cuenta_id, sal, verificador, etiqueta = cuenta
+    #Primero autentica los datos de la cuenta (para comprobar la integridad)
     if not hmac.compare_digest(etiqueta_cuenta(clave_mac, nombre, cuenta_id, sal, verificador),
                               etiqueta):
         raise InvalidTag("Cuenta alterada.")
-    return cuenta_id if verificar_password(password, sal, verificador) else None
+    #Después comprueba la contraseña.
+    if verificar_password(password, sal, verificador):
+        return cuenta_id
+    return None
 
 
 def aad(reserva):

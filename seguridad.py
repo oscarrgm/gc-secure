@@ -21,6 +21,9 @@ CONTEXTO_CLAVES = b"G&C Secure / claves / v1"
 #\x00 es un byte de valor cero que separa la etiqueta del mensaje.
 CONTEXTO_FIRMA = b"G&C Secure / justificante / v1\x00"
 
+#Prefijo del HMAC de la cuenta, tanto al registrarla como al autenticarla.
+CONTEXTO_REGISTRO = b"G&C Secure / cuenta / v1\x00"
+
 #PSS prepara el bloque que firma RSA. Usa el resumen del mensaje y una sal aleatoria de 32 bytes para calcular un segundo resumen, H.
 #MGF1 usa SHA-256 y H para generar una secuencia de bytes (la máscara). PSS la combina mediante XOR con la parte del bloque que contiene la sal.
 #Al verificar, se vuelve a generar la misma máscara y se aplica XOR de nuevo para recuperar la sal original.
@@ -59,20 +62,25 @@ def validar_password(password):
 def derivar(secreto, sal):
     #PBKDF2 repite el cálculo para encarecer cada intento de adivinar el secreto. "sha256" es la función resumen que usa HMAC y secreto.encode convierte
     #la contraseña en bytes para que HMAC pueda usarla como clave. sal permite obtener resultados distintos con la misma contraseña.
-    #ITERACIONES fija cuántas rondas se hacen (encareciendo ataques de fuerza bruta) y dklen=32 pide 32 bytes de salida.
+    #ITERACIONES fija cuántas rondas se hacen (encareciendo ataques de fuerza bruta)
+    # La contraseña es la clave de HMAC en todas las rondas.
+    # La primera usa la sal y un contador; las siguientes, el resultado anterior.
+    #dklen=32 pide 32 bytes de salida.
     return hashlib.pbkdf2_hmac("sha256", secreto.encode("utf-8"),
                                sal, ITERACIONES, dklen=32)
 
 
+#Comprueba que la contraseña coincide con el verificador guardado en la base de datos.
 def verificar_password(password, sal, verificador):
-    # Recalcula el verificador con la sal guardada y compara en tiempo constante.
     return hmac.compare_digest(derivar(password, sal), verificador)
 
 
+#El HMAC vincula los cuatro campos a la clave del sistema.
 def etiqueta_cuenta(clave, nombre, cuenta_id, sal, verificador):
-    # El HMAC vincula los cuatro campos a la clave del sistema.
+    #Reúne los cuatro campos como bytes. La sal y el verificador van en Base64 dentro del JSON.
     contenido = json_bytes([nombre, cuenta_id, codificar(sal), codificar(verificador)])
-    return hmac.digest(clave, b"G&C Secure / cuenta / v1\x00" + contenido, "sha256")
+    #Calcula una etiqueta HMAC con la clave secreta del centro y los datos de la cuenta.
+    return hmac.digest(clave, CONTEXTO_REGISTRO + contenido, "sha256")
 
 
 #Solo se llama al inicializar

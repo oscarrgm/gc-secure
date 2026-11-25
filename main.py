@@ -154,15 +154,21 @@ def menu(db, clave, privada, clave_mac):
                 if password != getpass.getpass("Repite la contraseña: "):
                     raise ValueError("Las contraseñas no coinciden.")
 
-                registrar(db, clave_mac, nombre, password) #Dentro de registrar, se valida el nombre y la contraseña, se genera la sal, el ID de la cuenta, el verificador y la etiqueta, y se inserta en la base de datos.
+            #Dentro de registrar, se valida el nombre y la contraseña, se genera la sal, el ID de la cuenta, el verificador y la etiqueta, y se inserta en la base de datos
+                registrar(db, clave_mac, nombre, password)
                 print("Cuenta creada.")
 
-            # := guarda el resultado de autenticar y comprueba si da acceso.
-            elif cuenta_id := autenticar(db, clave_mac, nombre, password):
-                del password
-                menu_usuario(db, clave, privada, cuenta_id)
-            else:
-                print("Credenciales incorrectas.")
+            #Opción para iniciar sesión.
+            elif opcion == "2":
+                cuenta_id = autenticar(db, clave_mac, nombre, password)
+                #Si autenticar no devuelve un ID, las credenciales son incorrectas.
+                if cuenta_id is None:
+                    print("Credenciales incorrectas.")
+                #Si autenticar devuelve un ID, se abre el menú de usuario
+                else:
+                    menu_usuario(db, clave, privada, cuenta_id)
+
+        #Errores
         except InvalidTag:
             print("Cuenta rechazada: falló la comprobación HMAC.", file=sys.stderr)
         except (ValueError, TypeError, sqlite3.Error) as error:
