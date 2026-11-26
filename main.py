@@ -1,8 +1,11 @@
 """Interfaz de consola de G&C Secure."""
+import csv
 import getpass
+import os
 import sqlite3
+import subprocess
 import sys
-from contextlib import closing
+from contextlib import closing, suppress
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature, InvalidTag
@@ -25,6 +28,7 @@ Uso:
   main.py [--datos CARPETA] verificar JUSTIFICANTE CLAVE_PUBLICA
 
 Si omites --datos, se usa la carpeta datos junto a main.py.
+Al inicializar, se crea una carpeta nueva con permisos restringidos.
 Al exportar la clave pública, se añade .pem al destino si falta.
 """
 
@@ -58,6 +62,41 @@ def leer_argumentos(argumentos):
         raise ValueError(f"Argumentos incorrectos para {comando}.")
     # Devuelve la carpeta (es un path), el comando y las rutas de archivo como objetos Path.
     return carpeta, comando, [Path(archivo) for archivo in archivos]
+
+
+#Funcion que prepara la carpeta de datos con permisos restringidos
+def preparar_carpeta_datos(carpeta):
+    #Solo cambiamos los permisos de una carpeta nueva. En sistemas POSIX, 0o700 da acceso al propietario y la carpeta se protege al crearla.
+    carpeta = carpeta.absolute()
+    carpeta.mkdir(parents=True, mode=0o700)
+    if sys.platform != "win32":
+        return
+
+    sistema = Path(os.environ["SystemRoot"]) / "System32"
+    try:
+        # El SID identifica a la cuenta aunque Windows esté en otro idioma.
+        identidad = subprocess.run(
+            [sistema / "whoami.exe", "/user", "/fo", "csv", "/nh"],
+            check=True, capture_output=True,
+        ).stdout
+        _, sid = next(csv.reader([identidad.decode("ascii", errors="replace").strip()]))
+        # Damos acceso al operador, al sistema y a los administradores.
+        # Los archivos nuevos heredan estos permisos en lugar de los del directorio padre.
+        icacls = sistema / "icacls.exe"
+        subprocess.run(
+            [icacls, carpeta, "/grant:r", f"*{sid}:(OI)(CI)F",
+             "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"],
+            check=True, capture_output=True,
+        )
+        subprocess.run(
+            [icacls, carpeta, "/inheritance:r"], check=True, capture_output=True,
+        )
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        # Si falla la configuración, aún no se han escrito las claves.
+        with suppress(OSError):
+            carpeta.rmdir()
+        raise OSError("No se pudieron restringir los permisos de la carpeta de datos.") from error
+
 
 #Escribe el contenido en la ruta indicada, pero falla si el archivo ya existe. Se usa para exportar la clave pública y los justificantes firmados.
 def guardar_nuevo(ruta, contenido):
@@ -244,9 +283,9 @@ def main():
             return 0
 
         if comando == "inicializar":
-            #Cada directorio se prepara una vez para conservar las claves y sus datos.
-            if ruta_claves.exists() or ruta_db.exists():
-                raise ValueError("Ya existen datos o claves en este directorio.") #Falla si intenta inicializar en un directorio que ya tiene claves o base de datos.
+            #Una instalación nueva usa una carpeta nueva para proteger sus archivos desde el principio.
+            if carpeta.exists():
+                raise ValueError("La carpeta de datos ya existe. Elige una nueva con --datos.")
 
             #Lee la contraseña del operador sin mostrarla en la terminal.
             password_operador = getpass.getpass("Contraseña de acceso del operador: ")
@@ -256,9 +295,8 @@ def main():
             if password_operador != getpass.getpass("Repite la contraseña: "):
                 raise ValueError("Las contraseñas no coinciden.")
 
-            #Creamos la carpeta donde guardaremos las claves y la base de datos
-            #parents=True crea también los directorios padres si no existen, exist_ok=True evita error si ya existe.
-            carpeta.mkdir(parents=True, exist_ok=True)
+            # Aplicamos los permisos antes de guardar el paquete cifrado.
+            preparar_carpeta_datos(carpeta)
 
             #Creamos las claves y las guardamos en el archivo de claves cifrado con la contraseña del operador.
             crear_claves(ruta_claves, password_operador)

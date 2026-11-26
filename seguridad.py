@@ -63,8 +63,8 @@ def derivar(secreto, salt):
     #PBKDF2 repite el cálculo para encarecer cada intento de adivinar el secreto. "sha256" es la función resumen que usa HMAC y secreto.encode convierte
     #la contraseña en bytes para que HMAC pueda usarla como clave. El salt permite obtener resultados distintos con la misma contraseña.
     #ITERACIONES fija cuántas rondas se hacen (encareciendo ataques de fuerza bruta)
-    # La contraseña es la clave de HMAC en todas las rondas.
-    # La primera usa el salt y un contador; las siguientes, el resultado anterior.
+    #La contraseña es la clave de HMAC en todas las rondas.
+    #La primera usa el salt y un contador y las siguientes, el resultado anterior.
     #dklen=32 pide 32 bytes de salida.
     return hashlib.pbkdf2_hmac("sha256", secreto.encode("utf-8"),
                                salt, ITERACIONES, dklen=32)

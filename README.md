@@ -13,29 +13,17 @@ py -3.11 -m venv .venv
 
 Si usas otra versión de Python compatible, ajusta el argumento de `py`. El primer comando de la aplicación pide una contraseña de acceso del operador y genera el archivo de claves. El menú vuelve a pedir esa contraseña y permite crear cuentas. Para las nuevas contraseñas se piden entre 12 y 128 caracteres, al menos una mayúscula, una minúscula y un dígito. Usa una contraseña de operador distinta de las contraseñas de las cuentas. Las reservas y el archivo de claves cifrado se guardan por defecto en `datos/`. Si quieres guardarlos en otra carpeta, elige su nombre en PowerShell y pásalo con `--datos`.
 
-### Permisos de los datos en Windows
+### Inicializar y abrir el centro
 
-Antes de inicializar, crea una carpeta de datos nueva con acceso para tu cuenta de operador, el sistema y los administradores de Windows. Sus archivos heredarán esos permisos. Ejecuta estos pasos desde PowerShell con la misma cuenta que usará la aplicación:
+Elige el nombre de una carpeta que todavía no exista. `inicializar` la crea con permisos restringidos antes de guardar las claves. En Windows da acceso a la cuenta que ejecuta el programa, al sistema y a los administradores. Usa la misma carpeta al abrir el menú y al exportar la clave pública.
 
 ```powershell
 $carpeta = 'datos'
-New-Item -ItemType Directory -Path $carpeta -ErrorAction Stop | Out-Null
-$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-icacls $carpeta /grant:r "*${sid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
-if ($LASTEXITCODE -ne 0) { throw 'No se pudieron conceder los permisos de la carpeta.' }
-icacls $carpeta /inheritance:r
-if ($LASTEXITCODE -ne 0) { throw 'No se pudo retirar la herencia de la carpeta.' }
-icacls $carpeta
-```
-
-Puedes sustituir `datos` por el nombre de carpeta que elijas en la primera línea. Usa ese mismo nombre al inicializar, al abrir el menú y al exportar la clave pública. Una vez inicializada, puedes comprobar los permisos de las claves con `icacls (Join-Path $carpeta 'claves.bin')`.
-
-Con la carpeta protegida, inicializa y abre la aplicación:
-
-```powershell
 .\.venv\Scripts\python.exe main.py --datos $carpeta inicializar
 .\.venv\Scripts\python.exe main.py --datos $carpeta
 ```
+
+En Windows puedes comprobar los permisos de las claves con `icacls (Join-Path $carpeta 'claves.bin')`.
 
 ## Recorrido de demostración
 
