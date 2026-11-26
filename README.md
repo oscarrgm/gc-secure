@@ -39,20 +39,19 @@ Con la carpeta protegida, inicializa y abre la aplicación:
 
 ## Recorrido de demostración
 
-1. Crea dos cuentas ficticias. Intenta entrar con una contraseña incorrecta y, después, con la correcta.
-2. Reserva una pista para mañana a las 18:00. Cierra sesión, entra con la segunda cuenta y comprueba que la franja ya no aparece y que esa reserva no figura en «Mis reservas».
-3. Vuelve a la cuenta titular y exporta el justificante como `justificante.json`. Cierra la aplicación.
+1. Crea una cuenta e inicia sesión.
+2. Reserva una pista para mañana a las 18:00. Puedes consultarla desde «Mis reservas».
+3. Exporta el justificante como `justificante.json` y cierra la aplicación.
 4. Exporta por separado la clave pública del centro y verifica el justificante:
 
 ```powershell
 .\.venv\Scripts\python.exe main.py --datos $carpeta exportar-publica centro.pem
 .\.venv\Scripts\python.exe main.py verificar justificante.json centro.pem
-.\.venv\Scripts\python.exe -m unittest -v
 ```
 
 Si escribes `centro` como destino de `exportar-publica`, se guarda como `centro.pem`. Para verificar un justificante, indica el nombre del archivo exportado, incluida la extensión.
 
-Las pruebas modifican copias temporales del texto cifrado, la etiqueta, los datos asociados y la firma. También comprueban la clave y la contraseña incorrectas, la colisión de nonce, la doble reserva y el flujo de consola tras reiniciar. Salir con código 1 indica que el comando no completó la operación.
+Salir con código 1 indica que el comando no completó la operación.
 
 ## Decisiones del programa
 
