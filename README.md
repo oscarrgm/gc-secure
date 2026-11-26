@@ -4,16 +4,38 @@ Aplicación local de consola para reservar pistas deportivas y comprobar justifi
 
 ## Instalar y ejecutar
 
-Abre PowerShell en esta carpeta y ejecuta:
+Abre PowerShell en esta carpeta y prepara el entorno de Python:
 
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe main.py inicializar
-.\.venv\Scripts\python.exe main.py
 ```
 
-Si usas otra versión de Python compatible, ajusta el argumento de `py`. El primer comando de la aplicación pide una contraseña de acceso del operador y genera el archivo de claves. El menú vuelve a pedir esa contraseña y permite crear cuentas. Para las nuevas contraseñas se piden entre 12 y 128 caracteres, al menos una mayúscula, una minúscula y un dígito. Usa una contraseña de operador distinta de las contraseñas de las cuentas. Las reservas se guardan en `datos/` junto con el archivo de claves cifrado. Para una demostración independiente puedes situar `--datos demo` antes del subcomando o usarlo al abrir el menú.
+Si usas otra versión de Python compatible, ajusta el argumento de `py`. El primer comando de la aplicación pide una contraseña de acceso del operador y genera el archivo de claves. El menú vuelve a pedir esa contraseña y permite crear cuentas. Para las nuevas contraseñas se piden entre 12 y 128 caracteres, al menos una mayúscula, una minúscula y un dígito. Usa una contraseña de operador distinta de las contraseñas de las cuentas. Las reservas y el archivo de claves cifrado se guardan por defecto en `datos/`. Si quieres guardarlos en otra carpeta, elige su nombre en PowerShell y pásalo con `--datos`.
+
+### Permisos de los datos en Windows
+
+Antes de inicializar, crea una carpeta de datos nueva con acceso para tu cuenta de operador, el sistema y los administradores de Windows. Sus archivos heredarán esos permisos. Ejecuta estos pasos desde PowerShell con la misma cuenta que usará la aplicación:
+
+```powershell
+$carpeta = 'datos'
+New-Item -ItemType Directory -Path $carpeta -ErrorAction Stop | Out-Null
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+icacls $carpeta /grant:r "*${sid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
+if ($LASTEXITCODE -ne 0) { throw 'No se pudieron conceder los permisos de la carpeta.' }
+icacls $carpeta /inheritance:r
+if ($LASTEXITCODE -ne 0) { throw 'No se pudo retirar la herencia de la carpeta.' }
+icacls $carpeta
+```
+
+Puedes sustituir `datos` por el nombre de carpeta que elijas en la primera línea. Usa ese mismo nombre al inicializar, al abrir el menú y al exportar la clave pública. Una vez inicializada, puedes comprobar los permisos de las claves con `icacls (Join-Path $carpeta 'claves.bin')`.
+
+Con la carpeta protegida, inicializa y abre la aplicación:
+
+```powershell
+.\.venv\Scripts\python.exe main.py --datos $carpeta inicializar
+.\.venv\Scripts\python.exe main.py --datos $carpeta
+```
 
 ## Recorrido de demostración
 
@@ -23,7 +45,7 @@ Si usas otra versión de Python compatible, ajusta el argumento de `py`. El prim
 4. Exporta por separado la clave pública del centro y verifica el justificante:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py exportar-publica centro.pem
+.\.venv\Scripts\python.exe main.py --datos $carpeta exportar-publica centro.pem
 .\.venv\Scripts\python.exe main.py verificar justificante.json centro.pem
 .\.venv\Scripts\python.exe -m unittest -v
 ```
@@ -41,6 +63,4 @@ Las pruebas modifican copias temporales del texto cifrado, la etiqueta, los dato
 
 El programa está pensado para un equipo bajo control del operador. Mantén la carpeta de datos bajo una cuenta del sistema con permisos de acceso restringidos y conserva juntos el archivo de claves y la base de datos cuando hagas copias. AES-GCM detecta la alteración de un registro de reserva que sigue presente, pero no impide el borrado ni detecta que se restaure una copia antigua completa. La disponibilidad de las pistas queda visible en la base de datos. Para comprobar quién firmó el justificante, el verificador necesita obtener la clave pública del centro por un canal de confianza.
 
-Se utilizó OpenAI Codex para diseñar e implementar el programa, las pruebas y estas instrucciones.
-
-Si conservas datos creados con el prototipo anterior a la revisión, déjalos en su carpeta y usa un directorio nuevo con `--datos demo` tanto al inicializar como al arrancar. La versión revisada usa identificadores de cuenta y una clave HMAC adicional.
+Si conservas datos creados con el prototipo anterior a la revisión, déjalos en su carpeta y elige otro nombre de carpeta y úsalo con `--datos` tanto al inicializar como al arrancar. La versión revisada usa identificadores de cuenta y una clave HMAC adicional.
