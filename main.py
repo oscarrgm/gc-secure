@@ -25,6 +25,7 @@ Uso:
   main.py [--datos CARPETA] verificar JUSTIFICANTE CLAVE_PUBLICA
 
 Si omites --datos, se usa la carpeta datos junto a main.py.
+Al exportar la clave pública, se añade .pem al destino si falta.
 """
 
 #Lee los argumentos de la línea de comandos y devuelve la carpeta de datos, el comando y las rutas de archivo como objetos Path.
@@ -276,8 +277,12 @@ def main():
         if comando == "exportar-publica":
             #Utilizamos la función clave_publica_pem para obtener la clave pública en formato PEM a partir de la clave privada.
             #Luego usamos guardar_nuevo para escribir la clave pública en el archivo destino (debe ser nuevo, ya que así no reemplazamos por accidente la clave pública de otro centro).
-            guardar_nuevo(archivos[0], clave_publica_pem(privada))
-            print("Clave pública exportada.")
+            destino = archivos[0]
+            #destino.name devuelve el nombre del archivo (sin la ruta). Si no termina en .pem, se añade.
+            if destino.name and not destino.name.lower().endswith(".pem"):
+                destino = destino.with_name(destino.name + ".pem")
+            guardar_nuevo(destino, clave_publica_pem(privada))
+            print(f"Clave pública exportada en {destino}.")
 
         #Si no hay comando, abrimos el menú normal. La base de datos se abre dentro de un bloque with para cerrarla automáticamente al salir del menú.
         else:

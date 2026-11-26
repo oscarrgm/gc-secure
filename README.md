@@ -50,6 +50,8 @@ Con la carpeta protegida, inicializa y abre la aplicación:
 .\.venv\Scripts\python.exe -m unittest -v
 ```
 
+Si escribes `centro` como destino de `exportar-publica`, se guarda como `centro.pem`. Para verificar un justificante, indica el nombre del archivo exportado, incluida la extensión.
+
 Las pruebas modifican copias temporales del texto cifrado, la etiqueta, los datos asociados y la firma. También comprueban la clave y la contraseña incorrectas, la colisión de nonce, la doble reserva y el flujo de consola tras reiniciar. Salir con código 1 indica que el comando no completó la operación.
 
 ## Decisiones del programa
