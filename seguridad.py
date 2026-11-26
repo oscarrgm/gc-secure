@@ -24,9 +24,9 @@ CONTEXTO_FIRMA = b"G&C Secure / justificante / v1\x00"
 #Prefijo del HMAC de la cuenta, tanto al registrarla como al autenticarla.
 CONTEXTO_REGISTRO = b"G&C Secure / cuenta / v1\x00"
 
-#PSS prepara el bloque que firma RSA. Usa el resumen del mensaje y una sal aleatoria de 32 bytes para calcular un segundo resumen, H.
-#MGF1 usa SHA-256 y H para generar una secuencia de bytes (la máscara). PSS la combina mediante XOR con la parte del bloque que contiene la sal.
-#Al verificar, se vuelve a generar la misma máscara y se aplica XOR de nuevo para recuperar la sal original.
+#PSS prepara el bloque que firma RSA. Usa el resumen del mensaje y un salt aleatorio de 32 bytes para calcular un segundo resumen, H.
+#MGF1 usa SHA-256 y H para generar una secuencia de bytes (la máscara). PSS la combina mediante XOR con la parte del bloque que contiene el salt.
+#Al verificar, se vuelve a generar la misma máscara y se aplica XOR de nuevo para recuperar el salt original.
 PSS = padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32)
 
 
@@ -58,27 +58,27 @@ def validar_password(password):
         raise ValueError("Incluye al menos una mayúscula, una minúscula y un dígito.")
 
 
-#Deriva una clave de 32 bytes a partir de la contraseña y la sal
-def derivar(secreto, sal):
+#Deriva una clave de 32 bytes a partir de la contraseña y el salt
+def derivar(secreto, salt):
     #PBKDF2 repite el cálculo para encarecer cada intento de adivinar el secreto. "sha256" es la función resumen que usa HMAC y secreto.encode convierte
-    #la contraseña en bytes para que HMAC pueda usarla como clave. sal permite obtener resultados distintos con la misma contraseña.
+    #la contraseña en bytes para que HMAC pueda usarla como clave. El salt permite obtener resultados distintos con la misma contraseña.
     #ITERACIONES fija cuántas rondas se hacen (encareciendo ataques de fuerza bruta)
     # La contraseña es la clave de HMAC en todas las rondas.
-    # La primera usa la sal y un contador; las siguientes, el resultado anterior.
+    # La primera usa el salt y un contador; las siguientes, el resultado anterior.
     #dklen=32 pide 32 bytes de salida.
     return hashlib.pbkdf2_hmac("sha256", secreto.encode("utf-8"),
-                               sal, ITERACIONES, dklen=32)
+                               salt, ITERACIONES, dklen=32)
 
 
 #Comprueba que la contraseña coincide con el verificador guardado en la base de datos.
-def verificar_password(password, sal, verificador):
-    return hmac.compare_digest(derivar(password, sal), verificador)
+def verificar_password(password, salt, verificador):
+    return hmac.compare_digest(derivar(password, salt), verificador)
 
 
 #El HMAC vincula los cuatro campos a la clave del sistema.
-def etiqueta_cuenta(clave, nombre, cuenta_id, sal, verificador):
-    #Reúne los cuatro campos como bytes. La sal y el verificador van en Base64 dentro del JSON.
-    contenido = json_bytes([nombre, cuenta_id, codificar(sal), codificar(verificador)])
+def etiqueta_cuenta(clave, nombre, cuenta_id, salt, verificador):
+    #Reúne los cuatro campos como bytes. El salt y el verificador van en Base64 dentro del JSON.
+    contenido = json_bytes([nombre, cuenta_id, codificar(salt), codificar(verificador)])
     #Calcula una etiqueta HMAC con la clave secreta del centro y los datos de la cuenta.
     return hmac.digest(clave, CONTEXTO_REGISTRO + contenido, "sha256")
 
@@ -100,24 +100,24 @@ def crear_claves(ruta, password_operador):
                             "mac": codificar(secrets.token_bytes(32))})  # Clave HMAC de las cuentas.
 
     #Protege las tres claves juntas con AES-GCM y una clave derivada de la contraseña.
-    sal, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
+    salt, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
     #Encriptamos el contenido con AES-GCM usando la clave derivada de la contraseña del operador, el nonce y el contexto CONTEXTO_CLAVES.
-    protegido = AESGCM(derivar(password_operador, sal)).encrypt(nonce, contenido, CONTEXTO_CLAVES) #se incluye el contexto para que AES-GCM autentique también el propósito de los datos cifrados
+    protegido = AESGCM(derivar(password_operador, salt)).encrypt(nonce, contenido, CONTEXTO_CLAVES) #se incluye el contexto para que AES-GCM autentique también el propósito de los datos cifrados
     #"x" crea un archivo nuevo y falla si ya existe y "b" permite escribir bytes.
     with ruta.open("xb") as archivo:
-        archivo.write(sal + nonce + protegido)
+        archivo.write(salt + nonce + protegido)
 
 #Carga las claves del sistema desde el archivo cifrado con la contraseña del operador
 def cargar_claves(ruta, password_operador):
-    #Lee el archivo en el mismo orden en que se escribió: sal, nonce y paquete cifrado con su etiqueta. El mínimo es 16 + 12 + 16 = 44 bytes:
-    #16 de sal, 12 de nonce y 16 de etiqueta AES-GCM, incluso sin contenido.
+    #Lee el archivo en el mismo orden en que se escribió: salt, nonce y paquete cifrado con su etiqueta. El mínimo es 16 + 12 + 16 = 44 bytes:
+    #16 de salt, 12 de nonce y 16 de etiqueta AES-GCM, incluso sin contenido.
     datos = ruta.read_bytes()
     if len(datos) < 44:
         raise ValueError("Fichero de claves incompleto.")
-    #Separa la sal y el nonce. El resto es el texto cifrado con su etiqueta al final.
-    sal, nonce, protegido = datos[:16], datos[16:28], datos[28:]
-    #Repite la derivación con la contraseña y la sal guardada. AES-GCM comprueba la etiqueta con el mismo nonce y contexto antes de devolver el JSON.
-    contenido = AESGCM(derivar(password_operador, sal)).decrypt(nonce, protegido, CONTEXTO_CLAVES)
+    #Separa el salt y el nonce. El resto es el texto cifrado con su etiqueta al final.
+    salt, nonce, protegido = datos[:16], datos[16:28], datos[28:]
+    #Repite la derivación con la contraseña y el salt guardado. AES-GCM comprueba la etiqueta con el mismo nonce y contexto antes de devolver el JSON.
+    contenido = AESGCM(derivar(password_operador, salt)).decrypt(nonce, protegido, CONTEXTO_CLAVES)
 
     #Lee el JSON que se preparó al crear las claves y lo convierte en un diccionario
     claves = json.loads(contenido)
@@ -140,9 +140,12 @@ def clave_publica_pem(privada):
                                              serialization.PublicFormat.SubjectPublicKeyInfo)
 
 
+#Se firma el justificante con la clave privada del centro. Se devuelve un JSON con el mensaje y la firma en Base64.
 def firmar_justificante(privada, reserva):
-    # Se firman los bytes exactos de la reserva y se empaquetan con la firma.
+    #Se firman los bytes exactos de la reserva y se empaquetan con la firma.
     mensaje = json_bytes(reserva)
+    #PSS prepara el bloque que firma RSA (usa un salt). CONTEXTO_FIRMA indica el tipo de documento y se concatena con el mensaje para que la firma dependa de ambos.
+    #hashes.SHA256() calcula el resumen de los datos que se firman.
     firma = privada.sign(CONTEXTO_FIRMA + mensaje, PSS, hashes.SHA256())
     return json_bytes({"mensaje": codificar(mensaje), "firma": codificar(firma)})
 
@@ -176,7 +179,7 @@ def verificar_justificante(publica_pem, documento):
     #El método .verify() de cryptography recibe:
     #1.firma: los bytes de la firma recuperados del justificante. (con la publica y la firma recupero el bloque PSS)
     #2.CONTEXTO_FIRMA + mensaje: los datos exactos que firmó el centro.
-    #3.PSS (como interpreto el bloque): la misma configuración de máscara y sal que se usó al firmar.
+    #3.PSS (como interpreto el bloque): la misma configuración de máscara y salt que se usó al firmar.
     #4.SHA256(): la función que calcula el resumen de los datos del punto 2.
     #Si la firma no coincide, verify lanza InvalidSignature y la función se detiene.
     publica.verify(firma, CONTEXTO_FIRMA + mensaje, PSS, hashes.SHA256())

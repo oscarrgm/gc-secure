@@ -36,8 +36,8 @@ class PracticaTest(unittest.TestCase):
                 registrar(self.db, self.clave_mac, "ana", debil)
         for nombre in ("ana", "luis"):
             registrar(self.db, self.clave_mac, nombre, self.password)
-        cuentas = self.db.execute("SELECT sal, verificador FROM usuarios").fetchall()
-        self.assertNotEqual(cuentas[0]["sal"], cuentas[1]["sal"])
+        cuentas = self.db.execute("SELECT salt, verificador FROM usuarios").fetchall()
+        self.assertNotEqual(cuentas[0]["salt"], cuentas[1]["salt"])
         self.assertNotEqual(cuentas[0]["verificador"], cuentas[1]["verificador"])
         self.assertTrue(autenticar(self.db, self.clave_mac, "ana", self.password))
         self.assertFalse(autenticar(self.db, self.clave_mac, "ana", "incorrecta"))

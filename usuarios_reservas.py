@@ -13,6 +13,7 @@ from seguridad import derivar, etiqueta_cuenta, json_bytes, validar_password, ve
 
 # Catálogo común: el menú muestra las pistas y disponibles() valida el número.
 PISTAS = {1: "Pádel", 2: "Tenis", 3: "Fútbol sala"}
+#Las franjas horarias son de 9 a 21, inclusive. La hora final no se reserva.
 HORAS = tuple(range(9, 22))
 # BLOB permite a SQLite guardar bytes directamente, sin convertirlos a Base64.
 ESQUEMA = """
@@ -21,12 +22,12 @@ CREATE TABLE IF NOT EXISTS usuarios (
     nombre TEXT PRIMARY KEY,
     -- Cada cuenta nueva recibe su propio ID, aunque reutilice un nombre.
     id TEXT NOT NULL UNIQUE,
-    -- La sal es aleatoria por cuenta. Se guarda para recalcular el verificador.
-    sal BLOB NOT NULL,
-    -- PBKDF2 calcula este valor a partir de la contraseña y la sal.
+    -- El salt es aleatorio por cuenta. Se guarda para recalcular el verificador.
+    salt BLOB NOT NULL,
+    -- PBKDF2 calcula este valor a partir de la contraseña y el salt.
     -- Al iniciar sesión se compara el resultado; la contraseña no se guarda.
     verificador BLOB NOT NULL,
-    -- HMAC de nombre, ID, sal y verificador para detectar cambios en la cuenta.
+    -- HMAC de nombre, ID, salt y verificador para detectar cambios en la cuenta.
     etiqueta BLOB NOT NULL
 );
 CREATE TABLE IF NOT EXISTS reservas (
@@ -68,18 +69,18 @@ def registrar(db, clave_mac, nombre, password):
     #Comprueba la contraseña
     validar_password(password)
 
-    #La base guarda un verificador y un HMAC, además de la sal y el ID.
-    sal = secrets.token_bytes(16)  #Sal aleatoria para el verificador de esta cuenta.
+    #La base guarda un verificador y un HMAC, además del salt y el ID.
+    salt = secrets.token_bytes(16)  #Salt aleatorio para el verificador de esta cuenta.
     cuenta_id = uuid4().hex #Genera un ID aleatorio y lo representa como texto hexadecimal.
-    verificador = derivar(password, sal) #Deriva una clave de 32 bytes a partir de la contraseña y la sal
-    etiqueta = etiqueta_cuenta(clave_mac, nombre, cuenta_id, sal, verificador) #Para comprobar que el nombre, ID, sal y verificador no se han modificado.
+    verificador = derivar(password, salt) #Deriva una clave de 32 bytes a partir de la contraseña y el salt
+    etiqueta = etiqueta_cuenta(clave_mac, nombre, cuenta_id, salt, verificador) #Para comprobar que el nombre, ID, salt y verificador no se han modificado.
 
     #Se añade al usuario a la base de datos. La transacción se confirma al salir del bloque with.
     try:
         with db:
             #Cada ? recibe un valor de la tupla de abajo, en el mismo orden.
             db.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)",
-                       (nombre, cuenta_id, sal, verificador, etiqueta))
+                       (nombre, cuenta_id, salt, verificador, etiqueta))
     #Si el nombre ya existe, SQLite rechaza el INSERT porque es clave primaria.
     except sqlite3.IntegrityError as error:
         raise ValueError("Ese nombre de usuario ya existe.") from error
@@ -92,33 +93,39 @@ def autenticar(db, clave_mac, nombre, password):
         return None
 
     #Busca por nombre (clave primaria). fetchone devuelve la fila (como objeto sqlite3.Row) o None.
-    cuenta = db.execute("SELECT id, sal, verificador, etiqueta FROM usuarios WHERE nombre = ?",
+    cuenta = db.execute("SELECT id, salt, verificador, etiqueta FROM usuarios WHERE nombre = ?",
                         (nombre,)).fetchone()
 
     if cuenta is None:
-        #Repite el cálculo costoso con una sal y un verificador ficticios (ceros).
+        #Repite el cálculo costoso con un salt y un verificador ficticios (ceros).
         #Así cuesta más distinguir por el tiempo si la cuenta existe.
         #Se ignora el resultado y el acceso se rechaza siempre.
-        verificar_password(password, bytes(16), bytes(32)) #Bytes(x) devuelve x ceros. La sal es de 16 bytes y el verificador de 32.
+        verificar_password(password, bytes(16), bytes(32)) #Bytes(x) devuelve x ceros. El salt es de 16 bytes y el verificador de 32.
         return None
 
 
     #Guardo los valores de la fila en variables.
-    cuenta_id, sal, verificador, etiqueta = cuenta
+    cuenta_id, salt, verificador, etiqueta = cuenta
     #Primero autentica los datos de la cuenta (para comprobar la integridad)
-    if not hmac.compare_digest(etiqueta_cuenta(clave_mac, nombre, cuenta_id, sal, verificador),
+    if not hmac.compare_digest(etiqueta_cuenta(clave_mac, nombre, cuenta_id, salt, verificador),
                               etiqueta):
         raise InvalidTag("Cuenta alterada.")
     #Después comprueba la contraseña.
-    if verificar_password(password, sal, verificador):
+    if verificar_password(password, salt, verificador):
         return cuenta_id
     return None
 
-
+#Prepara los datos asociados de la reserva. AES-GCM usa estos bytes para detectar cambios en los campos visibles sin necesidad de cifrarlos.
 def aad(reserva):
-    #AES-GCM autentica estos campos visibles al comprobar el titular cifrado.
-    return b"G&C Secure / reserva / v1\x00" + json_bytes(
-        {campo: reserva[campo] for campo in CAMPOS})
+    #Copia solo los campos visibles de CAMPOS: id, pista, fecha y hora.
+    campos_visibles = {}
+    for campo in CAMPOS:
+        campos_visibles[campo] = reserva[campo]
+    #El prefijo identifica estos datos como parte de una reserva de G&C Secure.
+    contexto = b"G&C Secure / reserva / v1\x00"
+    #Al cifrar y descifrar usamos la misma conversión a bytes. Si cambia un campo, AES-GCM detecta el cambio al comprobar la etiqueta.
+    datos_visibles = json_bytes(campos_visibles)
+    return contexto + datos_visibles
 
 
 #Lee todas las reservas de la base de datos y devuelve una lista de parejas (reserva, titular)
@@ -162,42 +169,59 @@ def disponibles(db, clave, pista, fecha):
     if pista not in PISTAS or dia.isoformat() != fecha or dia < ahora.date():
         raise ValueError("Elige una pista válida y una fecha no pasada (AAAA-MM-DD).")
 
-    # Guarda la hora de cada reserva que coincida con la pista y el día elegidos.
+    #Guarda las horas de las reservas que coincidan con la pista y el día elegidos.
     ocupadas = []
+    #leer_reservas devuelve una lista de parejas (reserva, titular). Solo nos interesa la reserva ([0]).
     for elemento in leer_reservas(db, clave):
-        #Cada elemento es una pareja: [0] son los datos de la reserva y [1] es el ID del titular. Para ver si está ocupada, solo usamos [0].
+        #Cada elemento es una pareja: [0] son los datos de la reserva y [1] es el ID del titular.
         reserva = elemento[0]
         if reserva["pista"] == pista and reserva["fecha"] == fecha:
             ocupadas.append(reserva["hora"])
 
+    #Devuelve las horas libres, que son las de HORAS que no están ocupadas y que no han pasado todavía.
     horas_libres = []
     for hora in HORAS:
-        if hora in ocupadas:
-            continue
-        # Une el día elegido y la hora de la franja para compararlos con ahora.
-        inicio_franja = datetime.combine(dia, time(hora))
-        if inicio_franja > ahora:
-            horas_libres.append(hora)
+        #Si la hora no está ocupada, comprueba que la franja aún no ha empezado.
+        if hora not in ocupadas:
+            #Une el día y la hora para comprobar que la franja aún no ha empezado.
+            inicio_franja = datetime.combine(dia, time(hora))
+            if inicio_franja > ahora:
+                horas_libres.append(hora)
     return horas_libres
 
-
+#Guarda una reserva en la base de datos, cifrando el ID del titular con AES-GCM.
 def reservar(db, clave, cuenta_id, pista, fecha, hora):
-    # El bloqueo cubre la consulta de disponibilidad, el nonce y la escritura.
+    # with db confirma la transacción si todo va bien o la revierte si hay un error.
     with db:
+        #Pide el turno de escritura antes de consultar, y lo mantiene hasta guardar la reserva, incluida la comprobación del nonce.
         db.execute("BEGIN IMMEDIATE")
+        #La franja pudo ocuparse desde que se mostró el menú. Si dos usuarios eligen la misma hora, quien consigue primero el turno puede guardarla.
+        #Si la guarda, el siguiente verá que ya está ocupada al comprobarla aquí
         if hora not in disponibles(db, clave, pista, fecha):
             raise ValueError("Esa franja no está disponible.")
+
+        #Crea un diccionario con los datos visibles de la reserva. El ID es aleatorio y se guarda en la base de datos.
         reserva = {"id": uuid4().hex, "pista": pista, "fecha": fecha, "hora": hora}
-        # Comprueba el nonce antes de cifrar con la clave de reservas.
+        #Genera un nonce y comprueba que no se repita en la base de datos, ya que AES-GCM necesita un nonce único para cada cifrado con la misma clave
         nonce = secrets.token_bytes(12)
         while db.execute("SELECT 1 FROM reservas WHERE nonce = ?", (nonce,)).fetchone():
             nonce = secrets.token_bytes(12)
+
+        #Cifra el ID del titular con AES-GCM, usando el nonce y los datos visibles de la reserva como datos asociados
         titular = AESGCM(clave).encrypt(nonce, cuenta_id.encode("utf-8"), aad(reserva))
+        #Se inserta la reserva en la base de datos. La transacción se confirma al salir del bloque with
         db.execute("INSERT INTO reservas VALUES (?, ?, ?, ?, ?, ?)",
                    (reserva["id"], pista, fecha, hora, nonce, titular))
     return reserva
 
 
+# Devuelve solo las reservas de la cuenta que ha iniciado sesión.
 def mis_reservas(db, clave, cuenta_id):
-    # El menú solo recibe las reservas del ID que inició sesión.
-    return [reserva for reserva, titular in leer_reservas(db, clave) if titular == cuenta_id]
+    reservas_propias = []
+    for elemento in leer_reservas(db, clave):
+        #Cada elemento contiene los datos de la reserva y el ID de su titular.
+        reserva = elemento[0]
+        titular = elemento[1]
+        if titular == cuenta_id:
+            reservas_propias.append(reserva)
+    return reservas_propias

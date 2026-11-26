@@ -14,6 +14,8 @@ from seguridad import (cargar_claves, clave_publica_pem, crear_claves,
 
 #Si no se indica --datos, se usa la carpeta datos junto a main.py.
 DATOS = Path(__file__).resolve().parent / "datos"
+
+#Mensaje de uso que se muestra al pedir ayuda o al dar argumentos incorrectos.
 USO = """G&C Secure | Reservas deportivas
 
 Uso:
@@ -25,7 +27,7 @@ Uso:
 Si omites --datos, se usa la carpeta datos junto a main.py.
 """
 
-# Lee los argumentos de la línea de comandos y devuelve la carpeta de datos, el comando y las rutas de archivo como objetos Path.
+#Lee los argumentos de la línea de comandos y devuelve la carpeta de datos, el comando y las rutas de archivo como objetos Path.
 def leer_argumentos(argumentos):
     # La carpeta de datos por defecto es "datos" junto a main.py., en caso de que no se indique otra.
     carpeta = DATOS
@@ -63,8 +65,8 @@ def guardar_nuevo(ruta, contenido):
         archivo.write(contenido)
 
 
+#Funcion que imprime los datos de una reserva en formato legible. Se usa para mostrar reservas y justificantes.
 def mostrar(reserva):
-    # El catálogo da el nombre de la pista; :02d muestra la hora con dos cifras.
     print(f'{reserva["id"]} | {PISTAS[reserva["pista"]]} | '
           f'{reserva["fecha"]} | {reserva["hora"]:02d}:00')
 
@@ -77,7 +79,7 @@ def elegir_pista_y_fecha():
     #Pide al usuario y devuelve el número de pista como entero y la fecha como texto.
     return int(input("Número de pista: ")), input("Fecha (AAAA-MM-DD): ").strip()
 
-# Menú que se muestra tras iniciar sesión.
+#Menú que se muestra tras iniciar sesión.
 #Permite ver disponibilidad, reservar, consultar reservas y exportar justificantes.
 def menu_usuario(db, clave, privada, cuenta_id):
     while True:
@@ -97,34 +99,54 @@ def menu_usuario(db, clave, privada, cuenta_id):
                 pista, fecha = elegir_pista_y_fecha()
                 #Busca las horas disponibles para la pista y fecha indicadas, usando la función disponibles de usuarios_reservas.py
                 horas = disponibles(db, clave, pista, fecha)
-
+                #Imprime las horas disponibles en formato HH:00, o un mensaje si no hay ninguna.
                 if not horas:
                     print("No hay franjas disponibles.")
+                    #Vuelve a mostrar el menú de usuario
                     continue
+
+                #Imprime todas las horas disponibles en una sola línea, separadas por comas.
                 print("Disponibles:", ", ".join(f"{hora:02d}:00" for hora in horas))
+                #Pregunta la hora de inicio de la reserva, o permite volver al menú si se pulsa Enter sin escribir nada.
                 entrada = input("Hora de inicio (HH) o Enter para volver: ").strip()
+                #Si introduce una hora, se llama a reservar para guardar la reserva en la base de datos.
                 if entrada:
+                    #Se mete la reserva en la base de datos y se devuelve un diccionario con los datos visibles de la reserva.
                     reserva = reservar(db, clave, cuenta_id, pista, fecha, int(entrada))
                     print("Reserva guardada y cifrada con AES-128-GCM.")
                     mostrar(reserva)
+
+            #Opción para consultar y exportar justificantes de reservas propias
             elif opcion in {"2", "3"}:
-                # Consultar y exportar parten de la misma lista de reservas propias.
+                #Consultar y exportar parten de la misma lista de reservas propias.
                 reservas = mis_reservas(db, clave, cuenta_id)
                 if not reservas:
                     print("No tienes reservas.")
                     continue
                 print("Etiquetas AES-GCM verificadas.")
-                for numero, reserva in enumerate(reservas, 1):
+
+                #La lista del menú se numera desde 1 para que puedas elegir una reserva.
+                numero = 1
+                #Se imprimen todas las reservas
+                for reserva in reservas:
                     print(f"{numero}. ", end="")
                     mostrar(reserva)
+                    numero += 1
+
+                #Si la opcion es exportar justificante, es el mismo proceso, y luego pide el número de reserva y la ruta donde guardar el justificante firmado.
                 if opcion == "3":
                     numero = int(input("Número de reserva: "))
+                    #Se comprueba que el número de reserva sea válido
                     if not 1 <= numero <= len(reservas):
                         raise ValueError("Número de reserva inválido.")
-                    # La lista visible empieza en 1; los índices de Python empiezan en 0.
+
+                    #La lista visible empieza en 1; los índices de Python empiezan en 0.
                     reserva = reservas[numero - 1]
+                    #Se pregunta la ruta donde guardar el justificante firmado
                     ruta = Path(input("Ruta para guardar el justificante: ").strip())
+                    #Se llama a firmar_justificante para firmar la reserva con la clave privada RSA y se guarda en la ruta indicada. Si el archivo ya existe, guardar_nuevo lanza un error.
                     guardar_nuevo(ruta, firmar_justificante(privada, reserva))
+                    #Si todo va bien, se muestra un mensaje indicando que el justificante se ha firmado y guardado correctamente.
                     print(f"Justificante firmado (RSA-PSS-2048/SHA-256): {ruta}")
             else:
                 print("Opción no válida.")
@@ -167,7 +189,7 @@ def menu(db, clave, privada, clave_mac):
                 if password != getpass.getpass("Repite la contraseña: "):
                     raise ValueError("Las contraseñas no coinciden.")
 
-            #Dentro de registrar, se valida el nombre y la contraseña, se genera la sal, el ID de la cuenta, el verificador y la etiqueta, y se inserta en la base de datos
+            #Dentro de registrar, se valida el nombre y la contraseña, se genera el salt, el ID de la cuenta, el verificador y la etiqueta, y se inserta en la base de datos
                 registrar(db, clave_mac, nombre, password)
                 print("Cuenta creada.")
 
